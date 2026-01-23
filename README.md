@@ -19,7 +19,6 @@ Describing UI issues to an AI is tedious. "The button in the header, no the othe
 
 - **Point and Click** — Click any element, add a comment. Captures CSS selectors, classes, computed styles, accessibility info.
 - **Bidirectional Chat** — Send annotations to Pi, continue the conversation from your browser.
-- **Two Workflows** — Invoke from Pi (`annotate` tool) or from browser (click icon or Cmd+Shift+A).
 - **Smart Identification** — Multi-select with drag, text selection for typos, area selection for layout issues.
 
 ## Quick Start
@@ -64,33 +63,14 @@ Restart Pi to load the extension.
 
 ## Usage
 
-### From Pi (Tool Invocation)
+1. **Activate** — Click the extension icon or press `Cmd+Shift+A`
+2. **Annotate** — Click elements, add comments
+3. **Send** — Click "Send to Pi" or "Send with Chat"
 
-```
-> Help me fix the styling issues on this page
+That's it. Pi receives structured annotations with CSS selectors and element info.
 
-# Pi invokes: annotate({ url: "http://localhost:3000" })
-# Chrome opens the toolbar
-# Click elements, add comments
-# Click "Send to Pi"
-# Pi receives annotations and makes changes
-```
-
-### From Browser (Manual)
-
-```
-# Press Cmd+Shift+A (or click extension icon)
-# Click elements, add comments
-# Click "Send to Pi" to send annotations
-# Or "Send with Chat" to start a conversation
-```
-
-### Activation
-
-| Method | Action |
-|--------|--------|
-| Click extension icon | Toggle annotation toolbar |
-| `Cmd+Shift+A` | Toggle annotation toolbar |
+> **Tip:** You can also ask Pi to open annotation mode:  
+> *"Open the annotation tool on localhost:3000"*
 
 ## Features
 

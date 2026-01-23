@@ -160,7 +160,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "annotate",
     label: "Annotate",
-    description: "Open visual annotation mode in Chrome. User clicks/selects elements and adds comments. Returns structured annotations with CSS selectors and element info for making code changes.",
+    description: "Open visual annotation mode in Chrome so the user can click/select elements and add comments. Only use when the user explicitly asks to annotate, visually point something out, or show you UI issues. Returns structured annotations with CSS selectors and element info.",
     parameters: Type.Object({
       url: Type.Optional(Type.String({ 
         description: "URL to annotate. If omitted, uses current Chrome tab." 
