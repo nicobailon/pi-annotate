@@ -264,6 +264,28 @@ export default function (pi: ExtensionAPI) {
   });
   
   // ─────────────────────────────────────────────────────────────────────
+  // /annotate command (user-invoked, fire-and-forget)
+  // ─────────────────────────────────────────────────────────────────────
+  
+  pi.registerCommand("annotate", {
+    description: "Open annotation mode in Chrome",
+    handler: async (args, ctx) => {
+      const url = args.trim() || undefined;
+      
+      try {
+        await connectToHost();
+        // Don't send id - this tells browser to use USER_MESSAGE flow
+        // (Tool invocations send id and expect ANNOTATIONS_COMPLETE back)
+        sendToHost({ type: "START_ANNOTATION", url });
+        ctx.ui.notify("Annotation mode opened in Chrome", "info");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        ctx.ui.notify(message, "error");
+      }
+    }
+  });
+  
+  // ─────────────────────────────────────────────────────────────────────
   // Cleanup on shutdown
   // ─────────────────────────────────────────────────────────────────────
   

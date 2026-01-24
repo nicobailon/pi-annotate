@@ -80,7 +80,7 @@ export interface AnnotationToolDetails {
 
 export type SocketMessage =
   // Pi → Chrome
-  | { type: "START_ANNOTATION"; id: number; url?: string }
+  | { type: "START_ANNOTATION"; id?: number; url?: string }  // id present = tool (expects ANNOTATIONS_COMPLETE), id absent = command (expects USER_MESSAGE)
   | { type: "AGENT_RESPONSE"; content: string }
   | { type: "ERROR"; message: string }
   // Chrome → Pi  

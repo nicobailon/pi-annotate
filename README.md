@@ -10,7 +10,7 @@
 [![Platform](https://img.shields.io/badge/Platform-macOS-blue?style=for-the-badge)]()
 
 ```bash
-# Click the extension icon (or Cmd+Shift+A)
+/annotate                        # Connect and open toolbar
 # Click what's broken, add comments
 # Send to Pi → Pi fixes it
 ```
@@ -63,14 +63,18 @@ Restart Pi to load the extension.
 
 ## Usage
 
-1. **Activate** — Click the extension icon or press `Cmd+Shift+A`
+1. **Connect** — Run `/annotate` in Pi (or `/annotate http://localhost:3000`)
 2. **Annotate** — Click elements, add comments
 3. **Send** — Click "Send to Pi" or "Send with Chat"
 
-That's it. Pi receives structured annotations with CSS selectors and element info.
+Once connected, you can also use `Cmd+Shift+A` or click the extension icon to reopen the toolbar anytime.
 
-> **Tip:** You can also ask Pi to open annotation mode:  
-> *"Open the annotation tool on localhost:3000"*
+| Method | Description |
+|--------|-------------|
+| `/annotate` | Connect to Chrome and open annotation toolbar |
+| `/annotate <url>` | Navigate to URL first, then open toolbar |
+| Extension icon | Toggle toolbar (after initial `/annotate`) |
+| `Cmd+Shift+A` | Toggle toolbar (after initial `/annotate`) |
 
 ## Features
 
@@ -139,7 +143,7 @@ Change color to match brand guidelines
 
 | Component | Purpose |
 |-----------|---------|
-| `index.ts` | Pi extension, registers `annotate` tool |
+| `index.ts` | Pi extension, registers `/annotate` command and `annotate` tool |
 | `types.ts` | Shared TypeScript types |
 | `generate-output.ts` | Markdown output generator |
 | `chrome-extension/src/` | React app (Toolbar, ChatPanel) |

@@ -38,8 +38,10 @@ export function App() {
       
       switch (msg.type) {
         case "START_ANNOTATION":
-          setPendingRequestId(msg.id);
-          setAnnotations([]);  // Clear previous annotations for fresh tool invocation
+          // id present = tool invocation (will send ANNOTATIONS_COMPLETE)
+          // id absent = command invocation (will send USER_MESSAGE)
+          setPendingRequestId(msg.id ?? null);
+          setAnnotations([]);  // Clear previous annotations for fresh session
           setIsActive(true);
           setShowChat(false);
           setChatMessages([]);

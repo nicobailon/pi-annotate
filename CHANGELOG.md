@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `/annotate` command for user-initiated annotation mode
+  - Run `/annotate` to connect and open toolbar on current tab
+  - Run `/annotate <url>` to navigate and open toolbar
+  - Fire-and-forget: opens toolbar immediately, annotations sent via `USER_MESSAGE`
+
+### Changed
+
+- **Browser-first workflow**: Connection now established via `/annotate` command, then toolbar can be toggled anytime with extension icon or `Cmd+Shift+A`
+- Made `id` optional in `START_ANNOTATION` message to differentiate command vs tool flow
+- Updated README with new usage instructions and method table
+
 ## [0.1.0] - 2026-01-22
 
 ### Added
