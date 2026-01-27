@@ -93,6 +93,12 @@ function redactForLog(msg) {
 function handleExtensionMessage(msg) {
   log(`From extension: ${redactForLog(msg)}`);
   
+  // Health check - respond immediately without forwarding
+  if (msg?.type === "PING") {
+    writeMessage({ type: "PONG", timestamp: Date.now() });
+    return;
+  }
+  
   if (piSocket && !piSocket.destroyed) {
     piSocket.write(JSON.stringify(msg) + "\n");
   } else {

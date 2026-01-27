@@ -41,14 +41,15 @@ chmod +x install.sh
 2. Enable **Developer mode**
 3. Click **Load unpacked**
 4. Select the `chrome-extension/` folder
-5. Copy the **Extension ID** shown
-6. Re-run install script with ID:
+5. **Click the Pi Annotate extension icon** in toolbar
+6. Click **Copy** next to the install command
+7. Run the copied command in `chrome-extension/native/`
 
 ```bash
 ./install.sh <extension-id>
 ```
 
-Restart Chrome after installation.
+Restart Chrome after installation. The popup will show **Connected** when ready.
 
 ### 3. Enable Pi Extension
 
@@ -79,9 +80,11 @@ Restart Pi to load the extension.
 
 | Key | Action |
 |-----|--------|
+| `⌘/Ctrl+Shift+P` | Toggle annotation UI |
 | `ESC` | Close annotation UI |
 | `Scroll` | Cycle through ancestor elements |
 | `Shift+Click` | Add to selection (multi-select) |
+| `Click hover preview` | Copy selector to clipboard |
 
 ## Features
 
@@ -184,6 +187,8 @@ pi-annotate/
     ├── manifest.json     # MV3 manifest
     ├── background.js     # Service worker
     ├── content.js        # Element picker UI
+    ├── popup.html        # Extension popup (status + setup)
+    ├── popup.js          # Popup logic + connection check
     └── native/
         ├── host.cjs      # Native messaging host
         ├── host-wrapper.sh
@@ -224,7 +229,8 @@ tail -f /tmp/pi-annotate-host.log
 | UI doesn't appear | Refresh page, or check service worker console |
 | "Cannot access chrome:// URL" | Normal — navigate to a regular webpage |
 | Screenshots not working | Check "Screenshots" checkbox is enabled |
-| Native host not connecting | Run `./install.sh <extension-id>` and restart Chrome |
+| Native host not connecting | Click extension icon to check status; re-run install command |
+| "Extension ID mismatch" | Copy install command from popup and re-run |
 | Socket errors | Check if socket exists: `ls -la /tmp/pi-annotate.sock` |
 
 ### Reset Everything

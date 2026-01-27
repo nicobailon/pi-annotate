@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #18181b;
+      color: #e5e5e5;
+      padding: 16px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #27272a;
+    }
+    .logo {
+      font-size: 20px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #a78bfa 0%, #6366f1 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .title { font-size: 14px; font-weight: 600; }
+    
+    /* Status bar */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      background: #27272a;
+      border-radius: 6px;
+      margin-bottom: 14px;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ef4444;
+      flex-shrink: 0;
+    }
+    .status-dot.connected { background: #22c55e; }
+    .status-dot.checking { background: #eab308; animation: pulse 1s infinite; }
+    .status-dot.trouble { background: #f97316; }
+    @keyframes pulse { 50% { opacity: 0.5; } }
+    .status-text { font-size: 12px; flex: 1; }
+    
+    /* Sections */
+    .section { margin-bottom: 14px; }
+    .label {
+      font-size: 10px;
+      color: #71717a;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .field {
+      display: flex;
+      gap: 6px;
+    }
+    .field input {
+      flex: 1;
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      border-radius: 4px;
+      color: #e5e5e5;
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      padding: 8px 10px;
+      outline: none;
+    }
+    .field input:focus { border-color: #6366f1; }
+    
+    /* Buttons */
+    .btn {
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      border-radius: 4px;
+      color: #a1a1aa;
+      font-size: 11px;
+      padding: 8px 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn:hover { background: #3f3f46; color: #e5e5e5; }
+    .btn.copied { background: #22c55e; border-color: #22c55e; color: white; }
+    .btn.primary {
+      background: #6366f1;
+      border-color: #6366f1;
+      color: white;
+      width: 100%;
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .btn.primary:hover { background: #4f46e5; }
+    
+    /* Ready state */
+    .ready-content {
+      text-align: center;
+      padding: 8px 0;
+    }
+    .ready-content .check {
+      font-size: 32px;
+      margin-bottom: 8px;
+    }
+    .ready-content p {
+      font-size: 12px;
+      color: #a1a1aa;
+      margin-bottom: 14px;
+    }
+    .shortcut {
+      display: inline-block;
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      color: #a1a1aa;
+    }
+    
+    /* Trouble state */
+    .trouble-box {
+      background: #292524;
+      border: 1px solid #44403c;
+      border-radius: 4px;
+      padding: 10px 12px;
+      font-size: 11px;
+      margin-bottom: 10px;
+    }
+    .trouble-box .title {
+      color: #f97316;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .trouble-box .detail {
+      color: #a8a29e;
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+      word-break: break-all;
+    }
+    .trouble-tips {
+      font-size: 11px;
+      color: #71717a;
+      line-height: 1.6;
+    }
+    .trouble-tips li { margin-bottom: 4px; }
+    
+    /* Footer */
+    .footer {
+      font-size: 11px;
+      color: #52525b;
+      padding-top: 12px;
+      border-top: 1px solid #27272a;
+      margin-top: 4px;
+    }
+    .footer a {
+      color: #6366f1;
+      text-decoration: none;
+    }
+    .footer a:hover { text-decoration: underline; }
+    
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="logo">π</span>
+    <span class="title">Pi Annotate</span>
+  </div>
+
+  <div class="status-bar">
+    <div class="status-dot checking" id="status-dot"></div>
+    <span class="status-text" id="status-text">Checking...</span>
+  </div>
+
+  <!-- Ready State -->
+  <div id="ready-section" class="hidden">
+    <div class="ready-content">
+      <div class="check">✓</div>
+      <p>Ready to annotate! Use the button below or keyboard shortcut.</p>
+      <div style="margin-bottom: 14px;">
+        <span class="shortcut" id="shortcut-key"></span>
+      </div>
+      <button class="btn primary" id="start-btn">Start Annotation</button>
+    </div>
+  </div>
+
+  <!-- Setup State -->
+  <div id="setup-section">
+    <div class="section">
+      <div class="label">Extension ID</div>
+      <div class="field">
+        <input type="text" id="ext-id" readonly>
+        <button class="btn" id="copy-id">Copy</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="label">Install Command</div>
+      <div class="field">
+        <input type="text" id="install-cmd" readonly>
+        <button class="btn" id="copy-cmd">Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Trouble State -->
+  <div id="trouble-section" class="hidden">
+    <div class="trouble-box">
+      <div class="title">⚠ Connection Issue</div>
+      <div class="detail" id="trouble-detail"></div>
+    </div>
+    <ul class="trouble-tips">
+      <li>Re-run install command with correct ID</li>
+      <li id="quit-tip">Fully quit Chrome and reopen</li>
+      <li>Check that paths exist in install output</li>
+    </ul>
+    <div style="margin-top: 10px;">
+      <button class="btn" id="retry-btn" style="width: 100%;">Retry Connection</button>
+    </div>
+  </div>
+
+  <div class="footer">
+    <a href="https://github.com/nicobailon/pi-annotate#quick-start" target="_blank">Setup Guide →</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

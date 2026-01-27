@@ -159,12 +159,8 @@ chrome.commands.onCommand.addListener((command) => {
   }
 });
 
-// Handle extension icon click
-chrome.action.onClicked.addListener((tab) => {
-  if (tab.id) {
-    chrome.tabs.sendMessage(tab.id, { type: "TOGGLE_PICKER" });
-  }
-});
+// Note: Extension icon click now shows popup (popup.html)
+// Use keyboard shortcut (Cmd+Shift+P) or /annotate command to toggle picker
 
 // Connect on startup
 connectNative();

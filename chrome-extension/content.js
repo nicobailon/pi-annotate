@@ -43,6 +43,7 @@
   let isActive = false;
   let requestId = null;
   let multiSelectMode = false;
+  let screenshotMode = "each"; // "each" | "full" | "none"
   
   // Element picker state
   let elementStack = [];
@@ -127,7 +128,7 @@
       background: linear-gradient(180deg, #1f1f23 0%, #18181b 100%);
       color: #e5e5e5;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      padding: 12px 16px;
+      padding: 10px 16px;
       z-index: ${Z_INDEX_PANEL};
       box-shadow: 0 -4px 24px rgba(0,0,0,0.5);
       border-top: 1px solid #3f3f46;
@@ -139,20 +140,19 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      margin-bottom: 8px;
-      padding-bottom: 8px;
+      margin-bottom: 6px;
+      padding-bottom: 6px;
       border-bottom: 1px solid #27272a;
     }
     
     .pi-logo { 
-      font-size: 16px; 
+      font-size: 15px; 
       font-weight: 700; 
       color: #a78bfa;
       background: linear-gradient(135deg, #a78bfa 0%, #6366f1 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
-    .pi-title { font-weight: 600; font-size: 13px; color: #fafafa; }
     .pi-hint { color: #71717a; font-size: 11px; margin-left: auto; }
     
     .pi-close {
@@ -169,25 +169,17 @@
     .pi-main {
       display: flex;
       gap: 12px;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
     
     .pi-left { flex: 1; min-width: 0; }
-    .pi-right { width: 200px; flex-shrink: 0; }
-    
-    .pi-section-label { 
-      color: #71717a; 
-      font-size: 10px; 
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 6px;
-    }
+    .pi-right { width: 160px; flex-shrink: 0; }
     
     .pi-chips {
       display: flex;
       flex-wrap: wrap;
       gap: 4px;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
       min-height: 26px;
     }
     
@@ -220,6 +212,27 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      cursor: pointer;
+      position: relative;
+    }
+    
+    .pi-chip-text:hover {
+      color: #e5e5e5;
+    }
+    
+    .pi-chip-text.copied::after {
+      content: "Copied!";
+      position: absolute;
+      top: -28px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #22c55e;
+      color: white;
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      white-space: nowrap;
+      z-index: 10;
     }
     
     .pi-chip-btns {
@@ -246,36 +259,10 @@
     
     .pi-empty { color: #52525b; font-size: 11px; font-style: italic; padding: 4px 0; }
     
-    .pi-add-btn {
-      background: #22c55e;
-      border: none;
-      border-radius: 4px;
-      padding: 6px 12px;
-      font-size: 11px;
-      font-weight: 500;
-      color: white;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      width: 100%;
-      justify-content: center;
-    }
-    
-    .pi-add-btn:hover { 
-      background: #16a34a;
-    }
-    
-    .pi-add-btn:disabled {
-      background: #27272a;
-      color: #52525b;
-      cursor: not-allowed;
-    }
-    
     .pi-mode-toggle {
       display: flex;
       gap: 4px;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
     
     .pi-mode-btn {
@@ -283,7 +270,7 @@
       background: #27272a;
       border: 1px solid #3f3f46;
       border-radius: 4px;
-      padding: 5px 8px;
+      padding: 4px 6px;
       font-size: 10px;
       color: #a1a1aa;
       cursor: pointer;
@@ -296,6 +283,12 @@
       background: #6366f1;
       border-color: #6366f1;
       color: white;
+    }
+    
+    .pi-controls-row {
+      display: flex;
+      gap: 4px;
+      margin-top: 6px;
     }
     
     .pi-prompt textarea {
@@ -318,29 +311,50 @@
     
     .pi-prompt textarea::placeholder { color: #52525b; }
     
-    .pi-actions {
+    .pi-options {
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    
+    .pi-options-label {
+      font-size: 12px;
+      color: #71717a;
+    }
+    
+    .pi-screenshot-toggle {
+      display: flex;
+      gap: 2px;
+      background: #1f1f23;
+      padding: 2px;
+      border-radius: 4px;
+    }
+    
+    .pi-ss-btn {
+      background: transparent;
+      border: none;
+      border-radius: 3px;
+      padding: 4px 10px;
+      font-size: 10px;
+      color: #71717a;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    
+    .pi-ss-btn:hover { color: #a1a1aa; }
+    
+    .pi-ss-btn.active {
+      background: #6366f1;
+      color: white;
+    }
+    
+    .pi-actions {
+      display: flex;
+      justify-content: flex-end;
       padding-top: 8px;
       border-top: 1px solid #27272a;
     }
-    
-    .pi-checkbox {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 11px;
-      color: #a1a1aa;
-      cursor: pointer;
-    }
-    
-    .pi-checkbox input {
-      width: 14px; height: 14px;
-      accent-color: #6366f1;
-    }
-    
-    #pi-fullpage-label { margin-left: 16px; font-size: 10px; color: #71717a; }
     
     .pi-buttons { display: flex; gap: 8px; }
     
@@ -375,32 +389,56 @@
       background: #27272a;
       border: 1px solid #3f3f46;
       border-radius: 4px;
-      padding: 6px 8px;
+      padding: 5px 8px;
       font-size: 10px;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       color: #a1a1aa;
-      margin-bottom: 6px;
+      /* Fixed height - prevent layout shift from long selectors */
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      /* Click to copy */
+      cursor: pointer;
+      transition: border-color 0.15s;
+      position: relative;
+    }
+    
+    .pi-current-info:hover {
+      border-color: #6366f1;
+    }
+    
+    .pi-current-info.copied {
+      border-color: #22c55e;
+    }
+    
+    .pi-current-info.copied::after {
+      content: "Copied!";
+      position: absolute;
+      top: -24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #22c55e;
+      color: white;
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      white-space: nowrap;
     }
     
     .pi-current-info .tag { color: #f472b6; }
     .pi-current-info .id { color: #fbbf24; }
     .pi-current-info .class { color: #60a5fa; }
     
-    .pi-nav-btns {
-      display: flex;
-      gap: 4px;
-      margin-bottom: 6px;
-    }
-    
     .pi-nav-btn {
       background: #27272a;
       border: 1px solid #3f3f46;
       border-radius: 4px;
-      padding: 4px 10px;
-      font-size: 11px;
+      padding: 5px 8px;
+      font-size: 13px;
       color: #a1a1aa;
       cursor: pointer;
       flex: 1;
+      text-align: center;
     }
     
     .pi-nav-btn:hover { background: #3f3f46; color: #e5e5e5; }
@@ -408,8 +446,9 @@
     
     .pi-nav-label {
       text-align: center;
-      font-size: 10px;
+      font-size: 9px;
       color: #52525b;
+      margin-top: 2px;
     }
   `;
   
@@ -486,6 +525,7 @@
     elementScreenshots = new Map();
     requestId = null;
     multiSelectMode = false;
+    screenshotMode = "each";
     
     console.log("[pi-annotate] Deactivated");
   }
@@ -520,47 +560,42 @@
     panelEl.innerHTML = `
       <div class="pi-header">
         <span class="pi-logo">π Annotate</span>
-        <span class="pi-hint">Click to select • Scroll or ▲▼ for parent/child • ESC to close</span>
+        <span class="pi-hint">Click to select • Scroll ancestors • Shift+click multi • ESC</span>
         <button class="pi-close" id="pi-close" title="Close (ESC)">×</button>
       </div>
       <div class="pi-main">
         <div class="pi-left">
-          <div class="pi-section-label">Selected Elements</div>
           <div class="pi-chips" id="pi-chips">
             <span class="pi-empty">Click an element on the page to select it</span>
+          </div>
+          <div class="pi-options">
+            <span class="pi-options-label">📷</span>
+            <div class="pi-screenshot-toggle">
+              <button class="pi-ss-btn active" id="pi-ss-each" title="Screenshot each selected element">Each</button>
+              <button class="pi-ss-btn" id="pi-ss-full" title="Screenshot full viewport">Full page</button>
+              <button class="pi-ss-btn" id="pi-ss-none" title="No screenshots">None</button>
+            </div>
           </div>
           <div class="pi-prompt">
             <textarea id="pi-prompt" placeholder="Describe what should change..."></textarea>
           </div>
         </div>
         <div class="pi-right">
-          <div class="pi-section-label">Selection Mode</div>
           <div class="pi-mode-toggle">
             <button class="pi-mode-btn active" id="pi-mode-single" title="Click replaces selection">Single</button>
             <button class="pi-mode-btn" id="pi-mode-multi" title="Click adds to selection">Multi</button>
           </div>
-          <div class="pi-section-label">Hover Preview</div>
           <div class="pi-current-info" id="pi-current-info">
-            <span style="color:#52525b">Hover over an element</span>
+            <span style="color:#52525b">Hover over element</span>
           </div>
           <div class="pi-nav-label" id="pi-nav-label">-</div>
-          <button class="pi-add-btn" id="pi-add-btn">+ Add to Selection</button>
-          <div class="pi-section-label" style="margin-top:12px">Modify Selection</div>
-          <div class="pi-nav-btns">
-            <button class="pi-nav-btn" id="pi-nav-up" title="Expand selection to parent">▲ Parent</button>
-            <button class="pi-nav-btn" id="pi-nav-down" title="Contract selection to child">▼ Child</button>
+          <div class="pi-controls-row">
+            <button class="pi-nav-btn" id="pi-nav-up" title="Expand to parent">▲</button>
+            <button class="pi-nav-btn" id="pi-nav-down" title="Contract to child">▼</button>
           </div>
         </div>
       </div>
       <div class="pi-actions">
-        <label class="pi-checkbox">
-          <input type="checkbox" id="pi-screenshot" checked>
-          Screenshots (per element with 📷)
-        </label>
-        <label class="pi-checkbox" id="pi-fullpage-label">
-          <input type="checkbox" id="pi-fullpage">
-          Full page instead
-        </label>
         <div class="pi-buttons">
           <button class="pi-btn pi-btn-cancel" id="pi-cancel">Cancel</button>
           <button class="pi-btn pi-btn-submit" id="pi-submit">Submit</button>
@@ -574,19 +609,30 @@
     document.getElementById("pi-submit").addEventListener("click", handleSubmit);
     document.getElementById("pi-nav-up").addEventListener("click", () => navParent(1));
     document.getElementById("pi-nav-down").addEventListener("click", () => navParent(-1));
-    document.getElementById("pi-add-btn").addEventListener("click", addCurrentElement);
     
     // Mode toggle
     document.getElementById("pi-mode-single").addEventListener("click", () => setMultiMode(false));
     document.getElementById("pi-mode-multi").addEventListener("click", () => setMultiMode(true));
     
-    // Stop events from reaching the page (but allow buttons to work)
+    // Screenshot mode toggle
+    document.getElementById("pi-ss-each").addEventListener("click", () => setScreenshotMode("each"));
+    document.getElementById("pi-ss-full").addEventListener("click", () => setScreenshotMode("full"));
+    document.getElementById("pi-ss-none").addEventListener("click", () => setScreenshotMode("none"));
+    
+    // Click to copy selector
+    document.getElementById("pi-current-info").addEventListener("click", copyCurrentSelector);
+    
+    // Stop events from reaching the page (but allow interactive elements to work)
     panelEl.addEventListener("mousemove", e => e.stopPropagation(), true);
     panelEl.addEventListener("click", e => {
       // Don't stop propagation for interactive elements - let them handle clicks
       const target = e.target;
       if (target.tagName === 'BUTTON' || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
         return; // Let it through
+      }
+      // Allow click-to-copy on current info box
+      if (target.closest('#pi-current-info')) {
+        return;
       }
       e.stopPropagation();
     }, true);
@@ -630,18 +676,6 @@
     }
   }
   
-  function addCurrentElement() {
-    const el = elementStack[stackIndex];
-    if (!el) return;
-    
-    // Check if already selected
-    if (selectedElements.some(s => s.element === el)) return;
-    
-    selectElement(el);
-    updateMarkers();
-    updateChips();
-  }
-  
   function setMultiMode(isMulti) {
     multiSelectMode = isMulti;
     const singleBtn = document.getElementById("pi-mode-single");
@@ -649,6 +683,18 @@
     if (singleBtn && multiBtn) {
       singleBtn.classList.toggle("active", !isMulti);
       multiBtn.classList.toggle("active", isMulti);
+    }
+  }
+  
+  function setScreenshotMode(mode) {
+    screenshotMode = mode;
+    const eachBtn = document.getElementById("pi-ss-each");
+    const fullBtn = document.getElementById("pi-ss-full");
+    const noneBtn = document.getElementById("pi-ss-none");
+    if (eachBtn && fullBtn && noneBtn) {
+      eachBtn.classList.toggle("active", mode === "each");
+      fullBtn.classList.toggle("active", mode === "full");
+      noneBtn.classList.toggle("active", mode === "none");
     }
   }
   
@@ -854,7 +900,9 @@
     
     const el = elementStack[stackIndex];
     if (!el) {
-      infoEl.innerHTML = '<span style="color:#52525b">Hover over an element</span>';
+      infoEl.innerHTML = '<span style="color:#52525b">Hover over element</span>';
+      infoEl.title = "";
+      delete infoEl.dataset.selector;
       if (labelEl) labelEl.textContent = "-";
       return;
     }
@@ -869,11 +917,36 @@
     
     infoEl.innerHTML = html;
     
+    // Build selector for copy and tooltip
+    let selector = tag;
+    if (id) selector += `#${id}`;
+    else if (classes.length) selector += `.${classes.join(".")}`;
+    infoEl.title = `${selector} (click to copy)`;
+    infoEl.dataset.selector = selector;
+    
     if (labelEl && elementStack.length > 1) {
       labelEl.textContent = `Level ${stackIndex + 1} of ${elementStack.length}`;
     } else if (labelEl) {
       labelEl.textContent = "1 element";
     }
+  }
+  
+  function copyCurrentSelector() {
+    const infoEl = document.getElementById("pi-current-info");
+    const selector = infoEl?.dataset?.selector;
+    if (!selector) return;
+    
+    navigator.clipboard.writeText(selector).then(() => {
+      infoEl.classList.add("copied");
+      setTimeout(() => infoEl.classList.remove("copied"), 1000);
+    }).catch(() => {
+      // Fallback - select text
+      const range = document.createRange();
+      range.selectNodeContents(infoEl);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
   }
   
   function hideTooltip() {
@@ -998,6 +1071,20 @@
         }
       });
     });
+    
+    // Click to copy selector on chip text
+    container.querySelectorAll(".pi-chip-text").forEach(textEl => {
+      textEl.addEventListener("click", e => {
+        e.stopPropagation();
+        const selector = textEl.title;
+        if (!selector) return;
+        
+        navigator.clipboard.writeText(selector).then(() => {
+          textEl.classList.add("copied");
+          setTimeout(() => textEl.classList.remove("copied"), 1000);
+        }).catch(() => {});
+      });
+    });
   }
   
   function createSelectionData(el) {
@@ -1098,8 +1185,6 @@
   
   async function handleSubmit() {
     const prompt = document.getElementById("pi-prompt")?.value?.trim() || "";
-    const wantScreenshot = document.getElementById("pi-screenshot")?.checked ?? true;
-    const fullPage = document.getElementById("pi-fullpage")?.checked ?? false;
     
     // Prepare data (without DOM refs)
     pruneStaleSelections();
@@ -1109,7 +1194,7 @@
     let screenshot = null; // Full page or null
     let screenshots = []; // Individual element screenshots [{index, dataUrl}]
     
-    if (wantScreenshot) {
+    if (screenshotMode !== "none") {
       hideHighlight();
       hideTooltip();
       markersContainer.style.display = "none";
@@ -1122,7 +1207,7 @@
         if (resp?.dataUrl) {
           const fullScreenshot = resp.dataUrl;
           
-          if (fullPage) {
+          if (screenshotMode === "full") {
             // Full page mode - single screenshot
             screenshot = fullScreenshot;
           } else {

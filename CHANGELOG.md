@@ -2,6 +2,29 @@
 
 All notable changes to Pi Annotate.
 
+## [0.1.3] - 2026-01-27
+
+### Added
+- **Extension popup** — Click extension icon to see connection status, copy Extension ID and install command
+- **PING/PONG health check** — Native host responds to PING for reliable connection detection
+- **Click to copy selector** — Click hover preview or chip text to copy selector with "Copied!" tooltip
+- **Screenshot mode toggle** — Choose between "Each element", "Full page", or "None" (replaces checkboxes)
+- **Platform-aware UI** — Popup shows correct keyboard shortcuts for Mac vs Windows/Linux
+
+### Changed
+- **UI polish** — Removed section labels, tighter spacing, narrower right panel (160px vs 200px)
+- **Fixed-height hover preview** — Single line with truncation prevents layout shift from long selectors
+- **Centered arrow buttons** — ▲/▼ buttons now properly centered with larger icons
+- **Options row** — Screenshot options moved inline with form elements, footer simplified
+
+### Removed
+- **+Add button** — Removed because hover changes when moving to click button (use Multi mode instead)
+- **Checkbox toggles** — Replaced with unified screenshot mode toggle
+
+### Fixed
+- **Popup state handling** — Proper detection of connected/not-installed/trouble states
+- **Click event propagation** — Click-to-copy works correctly with panel event handling
+
 ## [0.1.2] - 2026-01-27
 
 ### Security
