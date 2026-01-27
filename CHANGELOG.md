@@ -1,85 +1,45 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to Pi Annotate.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
-
-### Changed
-- Added `pi-package` keyword for npm discoverability (pi v0.50.0 package system)
-
-## [0.2.0] - 2026-01-24
+## [0.1.0] - 2026-01-27 (Complete Rewrite)
 
 ### Added
+- **Per-element screenshots** — Each selected element gets its own cropped screenshot
+- **📷 toggle button** — Enable/disable screenshot per element on chips
+- **Parent/Child navigation** — Modify selected elements with ▲/▼ buttons
+- **+/− buttons** — Expand to parent or contract to child on each chip
+- **`/annotate` command** — Works on current tab without requiring URL
+- **`/ann` alias** — Quick shortcut for annotation command
+- **Full page option** — Toggle to capture entire viewport instead
+- **ESC to close** — Keyboard shortcut to dismiss UI
+- **× close button** — Visual close button in header
 
-- `/annotate` command for user-initiated annotation mode
-  - Run `/annotate` to connect and open toolbar on current tab
-  - Run `/annotate <url>` to navigate and open toolbar
-  - Fire-and-forget: opens toolbar immediately, annotations sent via `USER_MESSAGE`
-
-- **Screenshot capture** (3 modes)
-  - **Viewport capture**: Click viewport icon to capture entire visible page
-  - **Area capture**: Click crop icon, then drag to select a region
-  - **Element capture**: Check "Include screenshot" in annotation popup to capture the element
-  - All screenshots included as base64 PNG in tool results
-  - Visual feedback with screenshot badge showing count
+### Changed
+- **Vanilla JS** — Complete rewrite from React (~800 lines vs 2000+)
+- **Native messaging** — Replaced HTTP polling with native messaging for reliability
+- **Text capture** — Increased from 100 to 500 characters
+- **Screenshot paths** — Saved to temp files with paths returned for LLM reading
+- **UI layout** — Reorganized with "Hover Preview" and "Modify Selection" sections
 
 ### Fixed
+- Socket data buffering for large screenshot payloads
+- Click events being blocked by panel overlay
+- Cancel button working without active connection
+- Content script injection on pages loaded before extension
 
-- Element screenshots now correctly use viewport coordinates for cropping (was incorrectly using document coordinates which caused misaligned captures on scrolled pages)
-- Standalone screenshots (viewport/area) now included in `USER_MESSAGE` for command flow (previously only sent via `ANNOTATIONS_COMPLETE` in tool flow)
+### Architecture
+```
+Pi Extension ← Unix Socket → Native Host ← Native Messaging → Chrome Extension
+```
 
-### Changed
+## Architecture
 
-- **Browser-first workflow**: Connection now established via `/annotate` command, then toolbar can be toggled anytime with extension icon or `Cmd+Shift+A`
-- Made `id` optional in `START_ANNOTATION` message to differentiate command vs tool flow
-- Updated README with new usage instructions and method table
-- Added `Screenshot` type and `screenshots` field to `AnnotationResult`
-- Added `screenshots` field to `USER_MESSAGE` socket message type
-
-## [0.1.0] - 2026-01-22
-
-### Added
-
-- **Pi Extension** (`index.ts`)
-  - `annotate` tool for LLM-invoked visual annotation
-  - Unix socket communication with Chrome extension
-  - Bidirectional chat via `turn_end` event forwarding
-  - Configurable timeout (default: 5 minutes)
-
-- **Chrome Extension**
-  - Toolbar UI adapted from [Agentation](https://github.com/benjitaylor/agentation)
-  - Single click, multi-select, text selection, area selection modes
-  - Annotation popup for adding comments
-  - ChatPanel for bidirectional conversation with Pi
-  - Dark/light theme support
-  - Draggable toolbar
-  - Detail level settings (Compact, Standard, Detailed, Forensic)
-  - localStorage persistence (7 days)
-  - Keyboard shortcut: `Cmd+Shift+A` / `Ctrl+Shift+A`
-
-- **Native Messaging Host** (`host.cjs`)
-  - Bridge between Chrome extension and Pi via Unix socket
-  - Automatic socket cleanup on exit
-  - Logging to `/tmp/pi-annotate-host.log`
-
-- **Developer Experience**
-  - Root-level npm scripts: `setup`, `build`, `dev`
-  - Single `npm run setup` for initial installation
-
-### Technical Details
-
-- Socket path: `/tmp/pi-annotate.sock`
-- Native host name: `com.pi.annotate`
-- Message protocol: Newline-delimited JSON over Unix socket
-- Chrome messaging: Native messaging API + content script messaging
-
-### Credits
-
-- UI components from [Agentation](https://github.com/benjitaylor/agentation) by Benji Taylor, Dennis Jin, and Alex Vanderzon
-- Native messaging patterns from [Surf CLI](https://github.com/nicobailon/surf-cli)
-
-[0.2.0]: https://github.com/nicobailon/pi-annotate/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/nicobailon/pi-annotate/releases/tag/v0.1.0
+| Aspect | This Version |
+|--------|--------------|
+| UI Framework | Vanilla JS |
+| Lines of code | ~800 |
+| Screenshots | Per-element crops |
+| Communication | Native messaging |
+| Chat | One-way submit |
+| Build step | None |
