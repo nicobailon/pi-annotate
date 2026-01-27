@@ -1,5 +1,5 @@
 /**
- * Pi Annotate v2 - Background Service Worker
+ * Pi Annotate - Background Service Worker
  * 
  * Connects to native messaging host and forwards messages between
  * the native host (Pi) and content scripts.

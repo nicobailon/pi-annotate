@@ -1,5 +1,5 @@
 /**
- * Pi Annotate v2 - Content Script
+ * Pi Annotate - Content Script
  * 
  * DevTools-like element picker:
  * - Hover to highlight elements
@@ -9,9 +9,21 @@
  */
 
 (() => {
-  // Prevent double-injection
-  if (window.__piAnnotateLoaded) return;
-  window.__piAnnotateLoaded = true;
+  // Prevent double-injection (use Symbol for unique key to avoid conflicts)
+  const LOADED_KEY = "__piAnnotate_" + chrome.runtime.id;
+  if (window[LOADED_KEY]) return;
+  window[LOADED_KEY] = true;
+  
+  // ─────────────────────────────────────────────────────────────────────
+  // Constants
+  // ─────────────────────────────────────────────────────────────────────
+  
+  const SCREENSHOT_PADDING = 20;
+  const TEXT_MAX_LENGTH = 500;
+  const Z_INDEX_MARKERS = 2147483644;
+  const Z_INDEX_HIGHLIGHT = 2147483645;
+  const Z_INDEX_PANEL = 2147483646;
+  const Z_INDEX_TOOLTIP = 2147483647;
   
   // ─────────────────────────────────────────────────────────────────────
   // State
@@ -42,7 +54,7 @@
     #pi-highlight {
       position: fixed;
       pointer-events: none;
-      z-index: 2147483645;
+      z-index: ${Z_INDEX_HIGHLIGHT};
       background: rgba(99, 102, 241, 0.1);
       border: 2px solid #6366f1;
       border-radius: 2px;
@@ -52,7 +64,7 @@
     #pi-tooltip {
       position: fixed;
       pointer-events: none;
-      z-index: 2147483647;
+      z-index: ${Z_INDEX_TOOLTIP};
       background: #1a1a1a;
       color: #e5e5e5;
       padding: 6px 10px;
@@ -73,7 +85,7 @@
       top: 0; left: 0;
       width: 100%; height: 100%;
       pointer-events: none;
-      z-index: 2147483644;
+      z-index: ${Z_INDEX_MARKERS};
     }
     
     .pi-marker {
@@ -105,7 +117,7 @@
       color: #e5e5e5;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       padding: 12px 16px;
-      z-index: 2147483646;
+      z-index: ${Z_INDEX_PANEL};
       box-shadow: 0 -4px 24px rgba(0,0,0,0.5);
       border-top: 1px solid #3f3f46;
     }
@@ -967,7 +979,7 @@
       tag: el.tagName.toLowerCase(),
       id: el.id || null,
       classes: Array.from(el.classList),
-      text: (el.textContent || "").slice(0, 500).trim().replace(/\s+/g, " "),
+      text: (el.textContent || "").slice(0, TEXT_MAX_LENGTH).trim().replace(/\s+/g, " "),
       rect: getRectData(el),
       attributes: getAttrs(el),
     };
@@ -991,16 +1003,15 @@
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
-        const padding = 20;
         const dpr = window.devicePixelRatio || 1;
         
         const rect = element.getBoundingClientRect();
         
         // Add padding and clamp to viewport
-        let minX = Math.max(0, rect.left - padding);
-        let minY = Math.max(0, rect.top - padding);
-        let maxX = Math.min(window.innerWidth, rect.right + padding);
-        let maxY = Math.min(window.innerHeight, rect.bottom + padding);
+        let minX = Math.max(0, rect.left - SCREENSHOT_PADDING);
+        let minY = Math.max(0, rect.top - SCREENSHOT_PADDING);
+        let maxX = Math.min(window.innerWidth, rect.right + SCREENSHOT_PADDING);
+        let maxY = Math.min(window.innerHeight, rect.bottom + SCREENSHOT_PADDING);
         
         // Scale for device pixel ratio
         const cropX = minX * dpr;
@@ -1018,55 +1029,6 @@
         resolve(canvas.toDataURL("image/png"));
       };
       img.onerror = () => resolve(dataUrl);
-      img.src = dataUrl;
-    });
-  }
-  
-  async function cropToSelection(dataUrl, selections) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        // Calculate bounding box of all selected elements (with padding)
-        const padding = 20;
-        const dpr = window.devicePixelRatio || 1;
-        
-        let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
-        
-        for (const sel of selections) {
-          if (!sel.element) continue;
-          const rect = sel.element.getBoundingClientRect();
-          minX = Math.min(minX, rect.left);
-          minY = Math.min(minY, rect.top);
-          maxX = Math.max(maxX, rect.right);
-          maxY = Math.max(maxY, rect.bottom);
-        }
-        
-        // Add padding and clamp to viewport
-        minX = Math.max(0, minX - padding);
-        minY = Math.max(0, minY - padding);
-        maxX = Math.min(window.innerWidth, maxX + padding);
-        maxY = Math.min(window.innerHeight, maxY + padding);
-        
-        // Scale for device pixel ratio (screenshot is at screen resolution)
-        const cropX = minX * dpr;
-        const cropY = minY * dpr;
-        const cropW = (maxX - minX) * dpr;
-        const cropH = (maxY - minY) * dpr;
-        
-        // Create canvas and crop
-        const canvas = document.createElement("canvas");
-        canvas.width = cropW;
-        canvas.height = cropH;
-        const ctx = canvas.getContext("2d");
-        
-        ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-        
-        resolve(canvas.toDataURL("image/png"));
-      };
-      img.onerror = () => {
-        console.error("[pi-annotate] Failed to load screenshot for cropping");
-        resolve(dataUrl); // Return original on error
-      };
       img.src = dataUrl;
     });
   }

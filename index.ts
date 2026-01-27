@@ -4,7 +4,7 @@ import * as net from "node:net";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import type { AnnotationResult, ElementSelection } from "./types.js";
+import type { AnnotationResult, ElementSelection, Viewport } from "./types.js";
 
 const SOCKET_PATH = "/tmp/pi-annotate.sock";
 
@@ -216,26 +216,45 @@ export default function (pi: ExtensionAPI) {
       })),
     }),
 
-    async execute(_toolCallId, params, _onUpdate, ctx) {
+    async execute(_toolCallId, params, _onUpdate, ctx, signal) {
       const { url, timeout = 300 } = params as { url?: string; timeout?: number };
 
-      return new Promise(async (resolve) => {
+      // Try to connect first
+      try {
+        await connectToHost();
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: "Failed to connect to Chrome extension. Make sure the Pi Annotate extension is installed and the native host is running." }],
+          details: { error: "Connection failed" },
+        };
+      }
+
+      return new Promise((resolve) => {
         let timeoutId: NodeJS.Timeout | null = null;
         
         const cleanup = () => {
           if (timeoutId) clearTimeout(timeoutId);
           pendingResolve = null;
+          signal?.removeEventListener("abort", onAbort);
+        };
+
+        const onAbort = () => {
+          cleanup();
+          sendToHost({ type: "CANCEL", reason: "aborted" });
+          resolve({
+            content: [{ type: "text", text: "Annotation was aborted." }],
+            details: { aborted: true },
+          });
         };
         
-        try {
-          await connectToHost();
-        } catch (err) {
-          resolve({
-            content: [{ type: "text", text: "Failed to connect to Chrome extension. Make sure the Pi Annotate extension is installed and the native host is running." }],
-            details: { error: "Connection failed" },
+        // Handle abort signal
+        if (signal?.aborted) {
+          return resolve({
+            content: [{ type: "text", text: "Annotation was aborted." }],
+            details: { aborted: true },
           });
-          return;
         }
+        signal?.addEventListener("abort", onAbort);
         
         // Set up response handler
         pendingResolve = (result) => {
