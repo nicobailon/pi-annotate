@@ -22,7 +22,7 @@ A simplified, ground-up rewrite focused on reliability and per-element screensho
 - **Per-element screenshots** — Each selected element gets its own cropped image
 - **📷 toggle per element** — Choose which elements to screenshot
 - **Vanilla JS** — No build step, no framework
-- **Parent/Child navigation** — Scroll wheel or buttons to traverse DOM
+- **DOM navigation** — Scroll to cycle ancestors, buttons to expand/contract
 - **Full page option** — Toggle for entire viewport capture
 
 ## Quick Start
@@ -69,9 +69,9 @@ Restart Pi to load the extension.
 | Action | How |
 |--------|-----|
 | **Select element** | Click on page |
-| **Cycle parents** | Scroll wheel or ▲/▼ buttons |
+| **Cycle ancestors** | Scroll wheel while hovering |
 | **Multi-select** | Toggle "Multi" mode or Shift+click |
-| **Expand/contract** | +/− buttons on chip, or Parent/Child |
+| **Expand/contract** | +/− on chip, or ▲/▼ buttons |
 | **Toggle screenshot** | 📷 button on each chip |
 | **Full page screenshot** | Check "Full page instead" |
 
@@ -80,7 +80,7 @@ Restart Pi to load the extension.
 | Key | Action |
 |-----|--------|
 | `ESC` | Close annotation UI |
-| `Scroll` | Cycle through parent elements |
+| `Scroll` | Cycle through ancestor elements |
 | `Shift+Click` | Add to selection (multi-select) |
 
 ## Features
@@ -88,7 +88,7 @@ Restart Pi to load the extension.
 **Element Picker**
 - Hover highlights with element info tooltip
 - Click to select, visual markers on selections
-- Scroll wheel cycles through parent/child elements
+- Scroll wheel cycles through ancestor elements
 - Parent/Child buttons modify selected element
 
 **Smart Screenshots**
@@ -127,8 +127,8 @@ Restart Pi to load the extension.
 
 ### Screenshots
 
-- Element 1: /tmp/pi-annotate-1234-el1.png
-- Element 2: /tmp/pi-annotate-1234-el2.png
+- Element 1: /var/folders/.../pi-annotate-1706012345678-el1.png
+- Element 2: /var/folders/.../pi-annotate-1706012345678-el2.png
 ```
 
 ## Architecture
