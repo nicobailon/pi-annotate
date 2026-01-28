@@ -22,6 +22,8 @@ export interface ElementSelection {
   rect: ElementRect;
   /** Selected HTML attributes */
   attributes: Record<string, string>;
+  /** Per-element annotation comment */
+  comment?: string;
 }
 
 /** Screenshot cropped to a specific element */

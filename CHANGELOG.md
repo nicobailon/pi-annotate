@@ -2,6 +2,63 @@
 
 All notable changes to Pi Annotate.
 
+## [0.2.1] - 2026-01-28
+
+### Added
+- **Dark/Light theme support** — Auto-detects system preference via `prefers-color-scheme`
+- **CSS custom properties** — 22 `--pi-*` variables for consistent theming aligned with pi interview tool
+- **Element bounding boxes** — Selected elements now show visible outline rectangles
+- **Expand/Contract buttons** — ▲/▼ buttons in note card headers to navigate parent/child elements
+- **`isPiElement()` helper** — Top-level function to detect pi-annotate UI elements
+- **`updateNoteCardLabel()` helper** — Reusable function for updating note card selectors
+
+### Changed
+- **Status updates** — Replaced `console.log` with `ctx.ui.setStatus("pi-annotate", message)` for proper pi integration
+- **Screenshot toggle labels** — Changed from `Each|Full|None` to `Screenshot: Crop|Full|None` for clarity
+- **Notes visibility toggle** — Replaced two buttons (▼▲) with single checkbox `☑ Notes`
+- **Camera button styling** — Now shows clear on/off state (40% opacity when off, green glow when on)
+- **Color palette** — Unified with pi interview tool (teal accent `#8abeb7`, consistent grays)
+
+### Fixed
+- **setStatus called before validation** — Moved status update after message type check in `handleMessage()`
+
+### Technical
+- Added `currentCtx` variable to store context for status updates in async callbacks
+- Extracted duplicated pi-element detection logic into single `isPiElement()` function
+- Extracted duplicated note card label update into `updateNoteCardLabel()` function
+- All 96 hardcoded colors replaced with CSS variables
+- Light theme overrides defined in `@media (prefers-color-scheme: light)` block
+
+## [0.2.0] - 2026-01-27
+
+### Added
+- **Inline note cards** — Each selected element gets a floating note card with its own textarea for per-element comments
+- **Draggable notes** — Drag note cards by their header to reposition them anywhere on screen
+- **Clickable badges** — Click numbered badges to toggle note cards open/closed
+- **SVG connectors** — Curved dashed lines connect note cards to their elements
+- **Scroll to element** — Click selector in note card header to scroll element into view with highlight flash
+- **Expand/Collapse all** — Toolbar buttons to open or close all notes at once
+- **Context input** — Simplified single-line input for overall context (replaces textarea)
+- **Per-element comments** — `comment` field added to ElementSelection type for structured annotation data
+- **Scroll/resize handlers** — Badges and connectors update when page scrolls or window resizes
+
+### Changed
+- **Panel simplified** — Removed chips section, added toolbar with mode toggles, screenshot options, and note controls
+- **Markers → Badges** — Replaced green marker boxes with purple clickable badge circles
+- **Auto-open notes** — Clicking an element automatically opens its note card and focuses the textarea
+- **formatResult output** — "User's request" renamed to "Context", per-element comments shown under each element
+
+### Removed
+- **Chips UI** — Replaced entirely by inline note cards
+- **Expand/contract per-chip** — Replaced by note card "remove" button and scroll-to-element
+
+### Technical
+- Added `elementComments`, `openNotes`, `notePositions`, `dragState` state variables
+- Added `createNotesContainer`, `createNoteCard`, `toggleNote`, `updateBadges`, `updateConnectors`, `removeElement`, `scrollToElement`, `expandAllNotes`, `collapseAllNotes` functions
+- Drag handlers use single document-level listeners to avoid memory leaks
+- Note card event handlers use `getIndex()` to read from DOM (survives reindexing)
+- `pruneStaleSelections` rebuilds note cards with correct indices after DOM changes
+
 ## [0.1.3] - 2026-01-27
 
 ### Added
@@ -10,6 +67,7 @@ All notable changes to Pi Annotate.
 - **Click to copy selector** — Click hover preview or chip text to copy selector with "Copied!" tooltip
 - **Screenshot mode toggle** — Choose between "Each element", "Full page", or "None" (replaces checkboxes)
 - **Platform-aware UI** — Popup shows correct keyboard shortcuts for Mac vs Windows/Linux
+- **Multi-terminal handling** — When another terminal runs `/annotate`, the old session is gracefully replaced with notification
 
 ### Changed
 - **UI polish** — Removed section labels, tighter spacing, narrower right panel (160px vs 200px)
@@ -24,6 +82,7 @@ All notable changes to Pi Annotate.
 ### Fixed
 - **Popup state handling** — Proper detection of connected/not-installed/trouble states
 - **Click event propagation** — Click-to-copy works correctly with panel event handling
+- **Session takeover** — New `/annotate` from different terminal properly resets UI state
 
 ## [0.1.2] - 2026-01-27
 

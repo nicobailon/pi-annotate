@@ -11,19 +11,20 @@
 
 ```bash
 /annotate                        # Open picker on current tab
-# Click elements, toggle 📷 per element
-# Submit → Pi receives focused screenshots
+# Click elements → Note cards appear inline
+# Add per-element comments → Submit
 ```
 
-A simplified, ground-up rewrite focused on reliability and per-element screenshots. DevTools-like element picker in vanilla JS.
+Figma-like annotation experience with floating inline note cards. DevTools-like element picker in vanilla JS.
 
 ## Highlights
 
+- **Inline note cards** — Each selected element gets a draggable floating note card
+- **Per-element comments** — Add specific instructions for each element
 - **Per-element screenshots** — Each selected element gets its own cropped image
 - **📷 toggle per element** — Choose which elements to screenshot
 - **Vanilla JS** — No build step, no framework
-- **DOM navigation** — Scroll to cycle ancestors, buttons to expand/contract
-- **Full page option** — Toggle for entire viewport capture
+- **SVG connectors** — Curved lines connect notes to elements
 
 ## Quick Start
 
@@ -69,12 +70,16 @@ Restart Pi to load the extension.
 
 | Action | How |
 |--------|-----|
-| **Select element** | Click on page |
+| **Select element** | Click on page → Note card auto-opens |
 | **Cycle ancestors** | Scroll wheel while hovering |
 | **Multi-select** | Toggle "Multi" mode or Shift+click |
-| **Expand/contract** | +/− on chip, or ▲/▼ buttons |
-| **Toggle screenshot** | 📷 button on each chip |
-| **Full page screenshot** | Check "Full page instead" |
+| **Add comment** | Type in note card textarea |
+| **Toggle screenshot** | 📷 button in note card header |
+| **Reposition note** | Drag note card by header |
+| **Scroll to element** | Click selector in note card |
+| **Toggle note** | Click numbered badge on element |
+| **Expand/collapse all** | ▼/▲ buttons in toolbar |
+| **Full page screenshot** | Click "Full" in screenshot toggle |
 
 ### Keyboard Shortcuts
 
@@ -90,20 +95,28 @@ Restart Pi to load the extension.
 
 **Element Picker**
 - Hover highlights with element info tooltip
-- Click to select, visual markers on selections
+- Click to select → Note card auto-opens
 - Scroll wheel cycles through ancestor elements
-- Parent/Child buttons modify selected element
+- Clickable badges toggle notes open/closed
+
+**Inline Note Cards**
+- **Draggable** — Reposition anywhere by dragging header
+- **Per-element comments** — Dedicated textarea for each element
+- **SVG connectors** — Curved dashed lines link notes to elements
+- **Scroll to element** — Click selector to bring element into view
+- **Screenshot toggle** — 📷 button per note card
 
 **Smart Screenshots**
-- 📷 **Per-element toggle** — Choose which elements get screenshots
 - **Individual crops** — Each element gets its own focused screenshot
 - **20px padding** — Clean cropping with breathing room
 - **Full page option** — Override to capture entire viewport
+- **Per-element toggle** — Disable screenshots on specific elements
 
-**Selection Management**
-- **+/−** buttons expand to parent or contract to first child
-- Chips show element tag, ID, or first class
-- Remove individual selections with × button
+**Simplified Panel**
+- Mode toggles (Single/Multi) for selection behavior
+- Screenshot mode (Each/Full/None)
+- Context input for overall description
+- Expand/collapse all notes buttons
 
 ## Output Format
 
@@ -111,7 +124,7 @@ Restart Pi to load the extension.
 ## Page Annotation: https://example.com
 **Viewport:** 1440×900
 
-**User's request:** Fix the button styling
+**Context:** Fix the styling issues on this page
 
 ### Selected Elements (2)
 
@@ -121,12 +134,14 @@ Restart Pi to load the extension.
    - Classes: `btn, btn-primary`
    - Text: "Submit"
    - Size: 120×40px
+   - **Comment:** Make this blue with rounded corners
 
 2. **div**
    - Selector: `.error-message`
    - Classes: `error-message, hidden`
    - Text: "Please fill required fields"
    - Size: 300×20px
+   - **Comment:** This should appear in red, not hidden
 
 ### Screenshots
 

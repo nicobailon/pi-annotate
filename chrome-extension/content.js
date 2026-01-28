@@ -1,11 +1,12 @@
 /**
- * Pi Annotate - Content Script
+ * Pi Annotate - Content Script (v0.2.0)
  * 
- * DevTools-like element picker:
+ * DevTools-like element picker with inline note cards:
  * - Hover to highlight elements
  * - Scroll to cycle through parent elements
  * - Click to select (shift+click for multi)
- * - Bottom panel for prompt input
+ * - Per-element floating note cards with comments
+ * - Bottom panel for overall context
  */
 
 (() => {
@@ -20,6 +21,7 @@
   
   const SCREENSHOT_PADDING = 20;
   const TEXT_MAX_LENGTH = 500;
+  const Z_INDEX_CONNECTORS = 2147483643;
   const Z_INDEX_MARKERS = 2147483644;
   const Z_INDEX_HIGHLIGHT = 2147483645;
   const Z_INDEX_PANEL = 2147483646;
@@ -36,6 +38,31 @@
       .replace(/'/g, "&#039;");
   }
   
+  // Check if element is part of pi-annotate UI (by id or class)
+  function isPiElement(el) {
+    if (!el) return false;
+    if (el.id?.startsWith("pi-")) return true;
+    const cls = el.className;
+    if (!cls) return false;
+    // Handle both string className and SVGAnimatedString
+    const clsStr = typeof cls === "string" ? cls : cls.baseVal || "";
+    return clsStr.split(/\s+/).some(c => c.startsWith("pi-"));
+  }
+  
+  // Update note card's displayed selector label
+  function updateNoteCardLabel(index) {
+    const sel = selectedElements[index];
+    if (!sel) return;
+    const card = notesContainer?.querySelector(`[data-index="${index}"]`);
+    if (!card) return;
+    const label = sel.id ? `#${sel.id}` : `${sel.tag}${sel.classes[0] ? "." + sel.classes[0] : ""}`;
+    const selectorEl = card.querySelector(".pi-note-selector");
+    if (selectorEl) {
+      selectorEl.textContent = label;
+      selectorEl.title = sel.selector;
+    }
+  }
+  
   // ─────────────────────────────────────────────────────────────────────
   // State
   // ─────────────────────────────────────────────────────────────────────
@@ -49,7 +76,15 @@
   let elementStack = [];
   let stackIndex = 0;
   let selectedElements = [];
-  let elementScreenshots = new Map(); // element index -> true/false for screenshot
+  let elementScreenshots = new Map(); // index → boolean
+  
+  // Note card state (v0.2.0)
+  let notesContainer = null;
+  let connectorsEl = null;
+  let elementComments = new Map(); // index → comment string
+  let openNotes = new Set();       // indices of currently open notes
+  let notePositions = new Map();   // index → {x, y} manual position overrides
+  let dragState = null;            // { card, startX, startY, startLeft, startTop }
   
   // DOM elements
   let highlightEl = null;
@@ -63,13 +98,69 @@
   // ─────────────────────────────────────────────────────────────────────
   
   const STYLES = `
+    /* ═══════════════════════════════════════════════════════════════════
+       CSS Custom Properties (aligned with pi interview theme)
+       ═══════════════════════════════════════════════════════════════════ */
+    :root {
+      --pi-bg-body: #18181e;
+      --pi-bg-card: #1e1e24;
+      --pi-bg-elevated: #252530;
+      --pi-bg-selected: #3a3a4a;
+      --pi-bg-hover: #2b2b37;
+      --pi-fg: #e0e0e0;
+      --pi-fg-muted: #808080;
+      --pi-fg-dim: #666666;
+      --pi-accent: #8abeb7;
+      --pi-accent-hover: #9dcec7;
+      --pi-accent-muted: rgba(138, 190, 183, 0.15);
+      --pi-border: #5f87ff;
+      --pi-border-muted: #505050;
+      --pi-border-focus: #7a7a8a;
+      --pi-success: #b5bd68;
+      --pi-warning: #f0c674;
+      --pi-error: #cc6666;
+      --pi-focus-ring: rgba(95, 135, 255, 0.2);
+      --pi-shadow: rgba(0, 0, 0, 0.5);
+      --pi-font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
+      --pi-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --pi-radius: 4px;
+    }
+    
+    /* Light theme */
+    @media (prefers-color-scheme: light) {
+      :root {
+        --pi-bg-body: #f8f8f8;
+        --pi-bg-card: #ffffff;
+        --pi-bg-elevated: #f0f0f0;
+        --pi-bg-selected: #d0d0e0;
+        --pi-bg-hover: #e8e8e8;
+        --pi-fg: #1a1a1a;
+        --pi-fg-muted: #6c6c6c;
+        --pi-fg-dim: #8a8a8a;
+        --pi-accent: #5f8787;
+        --pi-accent-hover: #4a7272;
+        --pi-accent-muted: rgba(95, 135, 135, 0.15);
+        --pi-border: #5f87af;
+        --pi-border-muted: #b0b0b0;
+        --pi-border-focus: #8a8a9a;
+        --pi-success: #87af87;
+        --pi-warning: #d7af5f;
+        --pi-error: #af5f5f;
+        --pi-focus-ring: rgba(95, 135, 175, 0.2);
+        --pi-shadow: rgba(0, 0, 0, 0.15);
+      }
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       Highlight & Tooltip
+       ═══════════════════════════════════════════════════════════════════ */
     #pi-highlight {
       position: fixed;
       pointer-events: none;
       z-index: ${Z_INDEX_HIGHLIGHT};
-      background: rgba(99, 102, 241, 0.1);
-      border: 2px solid #6366f1;
-      border-radius: 2px;
+      background: var(--pi-accent-muted);
+      border: 2px solid var(--pi-accent);
+      border-radius: var(--pi-radius);
       transition: all 0.05s ease-out;
     }
     
@@ -77,21 +168,25 @@
       position: fixed;
       pointer-events: none;
       z-index: ${Z_INDEX_TOOLTIP};
-      background: #1a1a1a;
-      color: #e5e5e5;
+      background: var(--pi-bg-card);
+      color: var(--pi-fg);
       padding: 6px 10px;
-      border-radius: 4px;
-      font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+      border-radius: var(--pi-radius);
+      border: 1px solid var(--pi-border-muted);
+      font: 12px/1.4 var(--pi-font-mono);
+      box-shadow: 0 2px 8px var(--pi-shadow);
       max-width: 400px;
     }
     
-    #pi-tooltip .tag { color: #f472b6; }
-    #pi-tooltip .id { color: #fbbf24; }
-    #pi-tooltip .class { color: #60a5fa; }
-    #pi-tooltip .size { color: #a3a3a3; margin-left: 8px; }
-    #pi-tooltip .hint { color: #6366f1; font-size: 11px; margin-top: 4px; display: block; }
+    #pi-tooltip .tag { color: var(--pi-error); }
+    #pi-tooltip .id { color: var(--pi-warning); }
+    #pi-tooltip .class { color: var(--pi-border); }
+    #pi-tooltip .size { color: var(--pi-fg-dim); margin-left: 8px; }
+    #pi-tooltip .hint { color: var(--pi-accent); font-size: 11px; margin-top: 4px; display: block; }
     
+    /* ═══════════════════════════════════════════════════════════════════
+       Markers & Selection
+       ═══════════════════════════════════════════════════════════════════ */
     #pi-markers {
       position: fixed;
       top: 0; left: 0;
@@ -100,38 +195,199 @@
       z-index: ${Z_INDEX_MARKERS};
     }
     
-    .pi-marker {
+    .pi-marker-outline {
       position: fixed;
       pointer-events: none;
-      border: 2px solid #22c55e;
-      background: rgba(34, 197, 94, 0.1);
-      border-radius: 2px;
+      border: 2px solid var(--pi-accent);
+      border-radius: var(--pi-radius);
+      background: var(--pi-accent-muted);
     }
     
     .pi-marker-badge {
-      position: absolute;
-      top: -10px; left: -10px;
-      background: #22c55e;
-      color: white;
-      min-width: 20px; height: 20px;
-      border-radius: 10px;
+      position: fixed;
+      pointer-events: auto;
+      background: var(--pi-accent);
+      color: var(--pi-bg-body);
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      font: bold 11px sans-serif;
-      padding: 0 6px;
+      font: bold 13px var(--pi-font-ui);
+      cursor: pointer;
+      box-shadow: 0 2px 8px var(--pi-shadow);
+      transition: transform 0.15s, box-shadow 0.15s;
     }
     
+    .pi-marker-badge:hover {
+      transform: scale(1.1);
+      background: var(--pi-accent-hover);
+    }
+    
+    .pi-marker-badge.open {
+      background: var(--pi-success);
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       Connectors
+       ═══════════════════════════════════════════════════════════════════ */
+    .pi-connectors {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: ${Z_INDEX_CONNECTORS};
+    }
+    
+    .pi-connector {
+      fill: none;
+      stroke: var(--pi-accent);
+      stroke-opacity: 0.5;
+      stroke-width: 2;
+      stroke-dasharray: 6 4;
+    }
+    
+    .pi-connector-dot {
+      fill: var(--pi-accent);
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       Note Cards
+       ═══════════════════════════════════════════════════════════════════ */
+    .pi-notes-container {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: ${Z_INDEX_MARKERS};
+    }
+    
+    .pi-note-card {
+      position: fixed;
+      width: 280px;
+      background: var(--pi-bg-card);
+      border: 1px solid var(--pi-border-muted);
+      border-radius: 8px;
+      box-shadow: 0 4px 24px var(--pi-shadow);
+      pointer-events: auto;
+      font-family: var(--pi-font-ui);
+      overflow: hidden;
+    }
+    
+    .pi-note-card * { box-sizing: border-box; }
+    
+    .pi-note-card:hover {
+      border-color: var(--pi-border-focus);
+    }
+    
+    .pi-note-card.dragging {
+      opacity: 0.9;
+      cursor: grabbing;
+    }
+    
+    .pi-note-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      background: var(--pi-bg-elevated);
+      border-bottom: 1px solid var(--pi-border-muted);
+      cursor: grab;
+    }
+    
+    .pi-note-badge {
+      background: var(--pi-accent);
+      color: var(--pi-bg-body);
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font: bold 11px var(--pi-font-ui);
+      flex-shrink: 0;
+    }
+    
+    .pi-note-selector {
+      flex: 1;
+      font: 12px var(--pi-font-mono);
+      color: var(--pi-fg-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    
+    .pi-note-selector:hover {
+      color: var(--pi-accent);
+      text-decoration: underline;
+    }
+    
+    .pi-note-screenshot,
+    .pi-note-close,
+    .pi-note-expand,
+    .pi-note-contract {
+      background: none;
+      border: none;
+      color: var(--pi-fg-dim);
+      font-size: 14px;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: var(--pi-radius);
+      transition: all 0.15s;
+    }
+    
+    .pi-note-expand,
+    .pi-note-contract { font-size: 11px; }
+    .pi-note-expand:hover,
+    .pi-note-contract:hover { background: var(--pi-bg-elevated); color: var(--pi-fg-muted); }
+    .pi-note-screenshot { opacity: 0.4; }
+    .pi-note-screenshot:hover { background: var(--pi-bg-elevated); opacity: 0.7; }
+    .pi-note-screenshot.active { opacity: 1; background: var(--pi-accent-muted); }
+    .pi-note-close:hover { background: var(--pi-bg-elevated); color: var(--pi-error); }
+    
+    .pi-note-body {
+      padding: 10px;
+    }
+    
+    .pi-note-textarea {
+      width: 100%;
+      background: var(--pi-bg-body);
+      border: 1px solid var(--pi-border-muted);
+      border-radius: 6px;
+      color: var(--pi-fg);
+      font: 13px/1.5 var(--pi-font-ui);
+      padding: 10px 12px;
+      resize: none;
+      min-height: 72px;
+      max-height: 160px;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    
+    .pi-note-textarea:focus {
+      outline: none;
+      border-color: var(--pi-accent);
+      box-shadow: 0 0 0 3px var(--pi-focus-ring);
+    }
+    
+    .pi-note-textarea::placeholder {
+      color: var(--pi-fg-dim);
+    }
+    
+    /* ═══════════════════════════════════════════════════════════════════
+       Bottom Panel
+       ═══════════════════════════════════════════════════════════════════ */
     #pi-panel {
       position: fixed;
       bottom: 0; left: 0; right: 0;
-      background: linear-gradient(180deg, #1f1f23 0%, #18181b 100%);
-      color: #e5e5e5;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--pi-bg-card);
+      color: var(--pi-fg);
+      font-family: var(--pi-font-ui);
       padding: 10px 16px;
       z-index: ${Z_INDEX_PANEL};
-      box-shadow: 0 -4px 24px rgba(0,0,0,0.5);
-      border-top: 1px solid #3f3f46;
+      box-shadow: 0 -4px 24px var(--pi-shadow);
+      border-top: 1px solid var(--pi-border-muted);
     }
     
     #pi-panel * { box-sizing: border-box; }
@@ -140,227 +396,153 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      margin-bottom: 6px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid #27272a;
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--pi-bg-elevated);
     }
     
     .pi-logo { 
       font-size: 15px; 
       font-weight: 700; 
-      color: #a78bfa;
-      background: linear-gradient(135deg, #a78bfa 0%, #6366f1 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      color: var(--pi-accent);
     }
-    .pi-hint { color: #71717a; font-size: 11px; margin-left: auto; }
+    .pi-hint { color: var(--pi-fg-dim); font-size: 11px; margin-left: auto; }
     
     .pi-close {
       background: none;
       border: none;
-      color: #71717a;
+      color: var(--pi-fg-dim);
       font-size: 18px;
       cursor: pointer;
       padding: 0 4px;
       line-height: 1;
     }
-    .pi-close:hover { color: #ef4444; }
+    .pi-close:hover { color: var(--pi-error); }
     
-    .pi-main {
+    .pi-toolbar {
       display: flex;
+      align-items: center;
       gap: 12px;
       margin-bottom: 8px;
     }
     
-    .pi-left { flex: 1; min-width: 0; }
-    .pi-right { width: 160px; flex-shrink: 0; }
-    
-    .pi-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-      margin-bottom: 6px;
-      min-height: 26px;
-    }
-    
-    .pi-chip {
-      background: #27272a;
-      border: 1px solid #3f3f46;
-      border-radius: 4px;
-      padding: 3px 6px;
-      font-size: 11px;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      max-width: 200px;
-    }
-    
-    .pi-chip-num {
-      background: #22c55e;
-      color: white;
-      width: 14px; height: 14px;
-      border-radius: 7px;
-      font-size: 9px;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-    
-    .pi-chip-text {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      cursor: pointer;
-      position: relative;
-    }
-    
-    .pi-chip-text:hover {
-      color: #e5e5e5;
-    }
-    
-    .pi-chip-text.copied::after {
-      content: "Copied!";
-      position: absolute;
-      top: -28px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #22c55e;
-      color: white;
-      font-size: 10px;
-      padding: 3px 8px;
-      border-radius: 4px;
-      white-space: nowrap;
-      z-index: 10;
-    }
-    
-    .pi-chip-btns {
-      display: flex;
-      gap: 2px;
-      margin-left: 2px;
-    }
-    
-    .pi-chip-btn {
-      color: #71717a;
-      cursor: pointer;
-      font-size: 12px;
-      padding: 0 2px;
-      line-height: 1;
-      background: none;
-      border: none;
-    }
-    
-    .pi-chip-btn:hover { color: #a1a1aa; }
-    .pi-chip-btn.remove:hover { color: #ef4444; }
-    .pi-chip-btn.screenshot { font-size: 11px; opacity: 0.4; }
-    .pi-chip-btn.screenshot.active { opacity: 1; }
-    .pi-chip-btn.screenshot:hover { opacity: 0.8; }
-    
-    .pi-empty { color: #52525b; font-size: 11px; font-style: italic; padding: 4px 0; }
-    
     .pi-mode-toggle {
       display: flex;
       gap: 4px;
-      margin-bottom: 6px;
     }
     
     .pi-mode-btn {
-      flex: 1;
-      background: #27272a;
-      border: 1px solid #3f3f46;
-      border-radius: 4px;
-      padding: 4px 6px;
-      font-size: 10px;
-      color: #a1a1aa;
+      background: var(--pi-bg-elevated);
+      border: 1px solid var(--pi-border-muted);
+      border-radius: var(--pi-radius);
+      padding: 5px 10px;
+      font-size: 11px;
+      color: var(--pi-fg-muted);
       cursor: pointer;
-      text-align: center;
+      transition: all 0.15s;
     }
     
-    .pi-mode-btn:hover { background: #3f3f46; }
+    .pi-mode-btn:hover { background: var(--pi-bg-hover); }
     
     .pi-mode-btn.active {
-      background: #6366f1;
-      border-color: #6366f1;
-      color: white;
-    }
-    
-    .pi-controls-row {
-      display: flex;
-      gap: 4px;
-      margin-top: 6px;
-    }
-    
-    .pi-prompt textarea {
-      width: 100%;
-      background: #27272a;
-      border: 1px solid #3f3f46;
-      border-radius: 4px;
-      color: #e5e5e5;
-      font-family: inherit;
-      font-size: 12px;
-      padding: 8px 10px;
-      resize: none;
-      height: 52px;
-    }
-    
-    .pi-prompt textarea:focus {
-      outline: none;
-      border-color: #6366f1;
-    }
-    
-    .pi-prompt textarea::placeholder { color: #52525b; }
-    
-    .pi-options {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 6px;
-    }
-    
-    .pi-options-label {
-      font-size: 12px;
-      color: #71717a;
+      background: var(--pi-accent);
+      border-color: var(--pi-accent);
+      color: var(--pi-bg-body);
     }
     
     .pi-screenshot-toggle {
       display: flex;
-      gap: 2px;
-      background: #1f1f23;
-      padding: 2px;
-      border-radius: 4px;
+      align-items: center;
+      gap: 6px;
+      background: var(--pi-bg-body);
+      padding: 2px 2px 2px 8px;
+      border-radius: var(--pi-radius);
+    }
+    
+    .pi-toggle-label {
+      font-size: 11px;
+      color: var(--pi-fg-dim);
     }
     
     .pi-ss-btn {
       background: transparent;
       border: none;
       border-radius: 3px;
-      padding: 4px 10px;
-      font-size: 10px;
-      color: #71717a;
+      padding: 5px 10px;
+      font-size: 11px;
+      color: var(--pi-fg-dim);
       cursor: pointer;
       transition: all 0.15s;
     }
     
-    .pi-ss-btn:hover { color: #a1a1aa; }
+    .pi-ss-btn:hover { color: var(--pi-fg-muted); }
     
     .pi-ss-btn.active {
-      background: #6366f1;
-      color: white;
+      background: var(--pi-accent);
+      color: var(--pi-bg-body);
     }
+    
+    .pi-spacer { flex: 1; }
+    
+    .pi-count {
+      font-size: 12px;
+      color: var(--pi-fg-dim);
+    }
+    
+    .pi-notes-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--pi-fg-muted);
+      cursor: pointer;
+      user-select: none;
+    }
+    
+    .pi-notes-toggle input {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--pi-accent);
+      cursor: pointer;
+    }
+    
+    .pi-notes-toggle:hover { color: var(--pi-fg); }
+    
+    .pi-context-row {
+      margin-bottom: 8px;
+    }
+    
+    .pi-context-row input {
+      width: 100%;
+      background: var(--pi-bg-body);
+      border: 1px solid var(--pi-border-muted);
+      border-radius: var(--pi-radius);
+      color: var(--pi-fg);
+      font-family: inherit;
+      font-size: 13px;
+      padding: 8px 12px;
+    }
+    
+    .pi-context-row input:focus {
+      outline: none;
+      border-color: var(--pi-accent);
+      box-shadow: 0 0 0 3px var(--pi-focus-ring);
+    }
+    
+    .pi-context-row input::placeholder { color: var(--pi-fg-dim); }
     
     .pi-actions {
       display: flex;
       justify-content: flex-end;
       padding-top: 8px;
-      border-top: 1px solid #27272a;
+      border-top: 1px solid var(--pi-bg-elevated);
     }
     
     .pi-buttons { display: flex; gap: 8px; }
     
     .pi-btn {
       padding: 6px 14px;
-      border-radius: 4px;
+      border-radius: var(--pi-radius);
       font-size: 12px;
       font-weight: 500;
       cursor: pointer;
@@ -369,86 +551,20 @@
     }
     
     .pi-btn-cancel {
-      background: #27272a;
-      color: #a1a1aa;
-      border: 1px solid #3f3f46;
+      background: var(--pi-bg-elevated);
+      color: var(--pi-fg-muted);
+      border: 1px solid var(--pi-border-muted);
     }
     
-    .pi-btn-cancel:hover { background: #3f3f46; color: #e5e5e5; }
+    .pi-btn-cancel:hover { background: var(--pi-bg-hover); color: var(--pi-fg); }
     
     .pi-btn-submit {
-      background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-      color: white;
+      background: var(--pi-accent);
+      color: var(--pi-bg-body);
     }
     
     .pi-btn-submit:hover { 
-      background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
-    }
-    
-    .pi-current-info {
-      background: #27272a;
-      border: 1px solid #3f3f46;
-      border-radius: 4px;
-      padding: 5px 8px;
-      font-size: 10px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      color: #a1a1aa;
-      /* Fixed height - prevent layout shift from long selectors */
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      /* Click to copy */
-      cursor: pointer;
-      transition: border-color 0.15s;
-      position: relative;
-    }
-    
-    .pi-current-info:hover {
-      border-color: #6366f1;
-    }
-    
-    .pi-current-info.copied {
-      border-color: #22c55e;
-    }
-    
-    .pi-current-info.copied::after {
-      content: "Copied!";
-      position: absolute;
-      top: -24px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #22c55e;
-      color: white;
-      font-size: 10px;
-      padding: 3px 8px;
-      border-radius: 4px;
-      white-space: nowrap;
-    }
-    
-    .pi-current-info .tag { color: #f472b6; }
-    .pi-current-info .id { color: #fbbf24; }
-    .pi-current-info .class { color: #60a5fa; }
-    
-    .pi-nav-btn {
-      background: #27272a;
-      border: 1px solid #3f3f46;
-      border-radius: 4px;
-      padding: 5px 8px;
-      font-size: 13px;
-      color: #a1a1aa;
-      cursor: pointer;
-      flex: 1;
-      text-align: center;
-    }
-    
-    .pi-nav-btn:hover { background: #3f3f46; color: #e5e5e5; }
-    .pi-nav-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    
-    .pi-nav-label {
-      text-align: center;
-      font-size: 9px;
-      color: #52525b;
-      margin-top: 2px;
+      background: var(--pi-accent-hover);
     }
   `;
   
@@ -476,7 +592,11 @@
   // ─────────────────────────────────────────────────────────────────────
   
   function activate() {
-    if (isActive) return;
+    if (isActive) {
+      console.log("[pi-annotate] Restarting session (new request)");
+      resetState();
+      return;
+    }
     isActive = true;
     
     // Inject styles
@@ -489,6 +609,7 @@
     createHighlight();
     createTooltip();
     createMarkers();
+    createNotesContainer();
     createPanel();
     
     // Add listeners
@@ -496,9 +617,60 @@
     document.addEventListener("click", onClick, true);
     document.addEventListener("wheel", onWheel, { passive: false, capture: true });
     document.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("scroll", handleScroll, true);
+    window.addEventListener("resize", handleResize);
+    initDragHandlers();
     
     document.body.style.cursor = "crosshair";
     console.log("[pi-annotate] Activated");
+  }
+  
+  function resetState() {
+    elementStack = [];
+    stackIndex = 0;
+    selectedElements = [];
+    elementScreenshots = new Map();
+    elementComments = new Map();
+    openNotes = new Set();
+    notePositions = new Map();
+    dragState = null;
+    multiSelectMode = false;
+    screenshotMode = "each";
+    
+    // Reset UI elements
+    if (markersContainer) markersContainer.innerHTML = "";
+    if (notesContainer) notesContainer.innerHTML = "";
+    if (connectorsEl) connectorsEl.innerHTML = "";
+    hideHighlight();
+    hideTooltip();
+    
+    // Reset mode toggle buttons
+    const singleBtn = document.getElementById("pi-mode-single");
+    const multiBtn = document.getElementById("pi-mode-multi");
+    if (singleBtn && multiBtn) {
+      singleBtn.classList.add("active");
+      multiBtn.classList.remove("active");
+    }
+    
+    // Reset screenshot mode buttons
+    const eachBtn = document.getElementById("pi-ss-each");
+    const fullBtn = document.getElementById("pi-ss-full");
+    const noneBtn = document.getElementById("pi-ss-none");
+    if (eachBtn && fullBtn && noneBtn) {
+      eachBtn.classList.add("active");
+      fullBtn.classList.remove("active");
+      noneBtn.classList.remove("active");
+    }
+    
+    // Clear context input
+    const contextEl = document.getElementById("pi-context");
+    if (contextEl) contextEl.value = "";
+    
+    // Update count
+    const countEl = document.getElementById("pi-count");
+    if (countEl) countEl.textContent = "0 selected";
+    
+    console.log("[pi-annotate] State reset for new session");
   }
   
   function deactivate() {
@@ -509,6 +681,9 @@
     document.removeEventListener("click", onClick, true);
     document.removeEventListener("wheel", onWheel, { capture: true });
     document.removeEventListener("keydown", onKeyDown, true);
+    window.removeEventListener("scroll", handleScroll, true);
+    window.removeEventListener("resize", handleResize);
+    cleanupDragHandlers();
     
     document.body.style.cursor = "";
     
@@ -517,12 +692,19 @@
     tooltipEl?.remove();
     panelEl?.remove();
     markersContainer?.remove();
+    notesContainer?.remove();
+    connectorsEl?.remove();
     
     styleEl = highlightEl = tooltipEl = panelEl = markersContainer = null;
+    notesContainer = connectorsEl = null;
     elementStack = [];
     stackIndex = 0;
     selectedElements = [];
     elementScreenshots = new Map();
+    elementComments = new Map();
+    openNotes = new Set();
+    notePositions = new Map();
+    dragState = null;
     requestId = null;
     multiSelectMode = false;
     screenshotMode = "each";
@@ -554,46 +736,45 @@
     document.body.appendChild(markersContainer);
   }
   
+  function createNotesContainer() {
+    notesContainer = document.createElement("div");
+    notesContainer.className = "pi-notes-container";
+    document.body.appendChild(notesContainer);
+    
+    connectorsEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    connectorsEl.setAttribute("class", "pi-connectors");
+    document.body.appendChild(connectorsEl);
+  }
+  
   function createPanel() {
     panelEl = document.createElement("div");
     panelEl.id = "pi-panel";
     panelEl.innerHTML = `
       <div class="pi-header">
         <span class="pi-logo">π Annotate</span>
-        <span class="pi-hint">Click to select • Scroll ancestors • Shift+click multi • ESC</span>
+        <span class="pi-hint">Click elements • ESC to close</span>
         <button class="pi-close" id="pi-close" title="Close (ESC)">×</button>
       </div>
-      <div class="pi-main">
-        <div class="pi-left">
-          <div class="pi-chips" id="pi-chips">
-            <span class="pi-empty">Click an element on the page to select it</span>
-          </div>
-          <div class="pi-options">
-            <span class="pi-options-label">📷</span>
-            <div class="pi-screenshot-toggle">
-              <button class="pi-ss-btn active" id="pi-ss-each" title="Screenshot each selected element">Each</button>
-              <button class="pi-ss-btn" id="pi-ss-full" title="Screenshot full viewport">Full page</button>
-              <button class="pi-ss-btn" id="pi-ss-none" title="No screenshots">None</button>
-            </div>
-          </div>
-          <div class="pi-prompt">
-            <textarea id="pi-prompt" placeholder="Describe what should change..."></textarea>
-          </div>
+      <div class="pi-toolbar">
+        <div class="pi-mode-toggle">
+          <button class="pi-mode-btn active" id="pi-mode-single" title="Click replaces selection">Single</button>
+          <button class="pi-mode-btn" id="pi-mode-multi" title="Click adds to selection">Multi</button>
         </div>
-        <div class="pi-right">
-          <div class="pi-mode-toggle">
-            <button class="pi-mode-btn active" id="pi-mode-single" title="Click replaces selection">Single</button>
-            <button class="pi-mode-btn" id="pi-mode-multi" title="Click adds to selection">Multi</button>
-          </div>
-          <div class="pi-current-info" id="pi-current-info">
-            <span style="color:#52525b">Hover over element</span>
-          </div>
-          <div class="pi-nav-label" id="pi-nav-label">-</div>
-          <div class="pi-controls-row">
-            <button class="pi-nav-btn" id="pi-nav-up" title="Expand to parent">▲</button>
-            <button class="pi-nav-btn" id="pi-nav-down" title="Contract to child">▼</button>
-          </div>
+        <div class="pi-screenshot-toggle">
+          <span class="pi-toggle-label">Screenshot</span>
+          <button class="pi-ss-btn active" id="pi-ss-each" title="Crop screenshot to each element">Crop</button>
+          <button class="pi-ss-btn" id="pi-ss-full" title="Capture entire viewport">Full</button>
+          <button class="pi-ss-btn" id="pi-ss-none" title="No screenshots">None</button>
         </div>
+        <div class="pi-spacer"></div>
+        <span class="pi-count" id="pi-count">0 selected</span>
+        <label class="pi-notes-toggle" title="Show/hide all note cards">
+          <input type="checkbox" id="pi-notes-visible" checked />
+          <span>Notes</span>
+        </label>
+      </div>
+      <div class="pi-context-row">
+        <input type="text" id="pi-context" placeholder="General context (optional)..." />
       </div>
       <div class="pi-actions">
         <div class="pi-buttons">
@@ -607,8 +788,6 @@
     document.getElementById("pi-close").addEventListener("click", handleCancel);
     document.getElementById("pi-cancel").addEventListener("click", handleCancel);
     document.getElementById("pi-submit").addEventListener("click", handleSubmit);
-    document.getElementById("pi-nav-up").addEventListener("click", () => navParent(1));
-    document.getElementById("pi-nav-down").addEventListener("click", () => navParent(-1));
     
     // Mode toggle
     document.getElementById("pi-mode-single").addEventListener("click", () => setMultiMode(false));
@@ -619,61 +798,24 @@
     document.getElementById("pi-ss-full").addEventListener("click", () => setScreenshotMode("full"));
     document.getElementById("pi-ss-none").addEventListener("click", () => setScreenshotMode("none"));
     
-    // Click to copy selector
-    document.getElementById("pi-current-info").addEventListener("click", copyCurrentSelector);
+    // Notes visibility toggle
+    document.getElementById("pi-notes-visible").addEventListener("change", (e) => {
+      if (e.target.checked) {
+        expandAllNotes();
+      } else {
+        collapseAllNotes();
+      }
+    });
     
-    // Stop events from reaching the page (but allow interactive elements to work)
+    // Stop events from reaching the page
     panelEl.addEventListener("mousemove", e => e.stopPropagation(), true);
     panelEl.addEventListener("click", e => {
-      // Don't stop propagation for interactive elements - let them handle clicks
       const target = e.target;
-      if (target.tagName === 'BUTTON' || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-        return; // Let it through
-      }
-      // Allow click-to-copy on current info box
-      if (target.closest('#pi-current-info')) {
+      if (target.tagName === "BUTTON" || target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
         return;
       }
       e.stopPropagation();
     }, true);
-  }
-  
-  function navParent(dir) {
-    // Always operate on the last selected element
-    if (!selectedElements.length) {
-      console.log("[pi-annotate] No selected element - click an element first");
-      return;
-    }
-    
-    const lastIdx = selectedElements.length - 1;
-    const sel = selectedElements[lastIdx];
-    if (!sel?.element) return;
-    
-    if (dir > 0) {
-      // Go to parent
-      const parent = sel.element.parentElement;
-      if (parent && parent !== document.body && parent !== document.documentElement && !parent.id?.startsWith("pi-")) {
-        console.log("[pi-annotate] Expanding selection to parent:", parent.tagName);
-        selectedElements[lastIdx] = createSelectionData(parent);
-        updateMarkers();
-        updateChips();
-      } else {
-        console.log("[pi-annotate] Already at root - no valid parent");
-      }
-    } else {
-      // Go to first child
-      const children = Array.from(sel.element.children).filter(c => 
-        c.nodeType === 1 && !c.id?.startsWith("pi-")
-      );
-      if (children.length > 0) {
-        console.log("[pi-annotate] Contracting selection to child:", children[0].tagName);
-        selectedElements[lastIdx] = createSelectionData(children[0]);
-        updateMarkers();
-        updateChips();
-      } else {
-        console.log("[pi-annotate] No children to contract to");
-      }
-    }
   }
   
   function setMultiMode(isMulti) {
@@ -699,11 +841,541 @@
   }
   
   // ─────────────────────────────────────────────────────────────────────
+  // Note Card Functions
+  // ─────────────────────────────────────────────────────────────────────
+  
+  function calculateNotePosition(element, cardWidth = 280, cardHeight = 150) {
+    const rect = element.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
+    const margin = 16;
+    
+    // Try right side first
+    if (rect.right + margin + cardWidth < vw) {
+      return { x: rect.right + margin, y: Math.max(margin, rect.top) };
+    }
+    // Try left side
+    if (rect.left - margin - cardWidth > 0) {
+      return { x: rect.left - margin - cardWidth, y: Math.max(margin, rect.top) };
+    }
+    // Try below
+    if (rect.bottom + margin + cardHeight < vh - panelHeight) {
+      return { x: Math.max(margin, rect.left), y: rect.bottom + margin };
+    }
+    // Try above
+    if (rect.top - margin - cardHeight > 0) {
+      return { x: Math.max(margin, rect.left), y: rect.top - margin - cardHeight };
+    }
+    // Fallback: offset from element
+    return { x: Math.min(rect.right + margin, vw - cardWidth - margin), y: Math.max(margin, rect.top) };
+  }
+  
+  function hasOverlap(rect1, rect2, margin = 8) {
+    return !(
+      rect1.right + margin < rect2.left ||
+      rect1.left > rect2.right + margin ||
+      rect1.bottom + margin < rect2.top ||
+      rect1.top > rect2.bottom + margin
+    );
+  }
+  
+  function adjustForCollisions(position, cardSize, existingCards) {
+    const myRect = {
+      left: position.x,
+      top: position.y,
+      right: position.x + cardSize.width,
+      bottom: position.y + cardSize.height
+    };
+    
+    let adjusted = { ...position };
+    let attempts = 0;
+    
+    while (attempts < 10) {
+      let collision = false;
+      
+      for (const card of existingCards) {
+        const cardRect = card.getBoundingClientRect();
+        if (hasOverlap(myRect, cardRect)) {
+          adjusted.y = cardRect.bottom + 12;
+          myRect.top = adjusted.y;
+          myRect.bottom = adjusted.y + cardSize.height;
+          collision = true;
+          break;
+        }
+      }
+      
+      if (!collision) break;
+      attempts++;
+    }
+    
+    // Clamp to viewport
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
+    adjusted.x = Math.max(16, Math.min(adjusted.x, vw - cardSize.width - 16));
+    adjusted.y = Math.max(16, Math.min(adjusted.y, vh - cardSize.height - panelHeight - 16));
+    
+    return adjusted;
+  }
+  
+  function createNoteCard(index) {
+    const sel = selectedElements[index];
+    if (!sel || !sel.element || !document.contains(sel.element)) return null;
+    
+    // Guard against duplicate cards
+    if (openNotes.has(index)) {
+      return notesContainer.querySelector(`[data-index="${index}"]`);
+    }
+    
+    // Use stored position if user previously dragged, otherwise calculate
+    let adjustedPos;
+    if (notePositions.has(index)) {
+      adjustedPos = notePositions.get(index);
+    } else {
+      const position = calculateNotePosition(sel.element);
+      adjustedPos = adjustForCollisions(
+        position,
+        { width: 280, height: 150 },
+        notesContainer.querySelectorAll(".pi-note-card")
+      );
+    }
+    
+    const label = sel.id ? `#${sel.id}` : `${sel.tag}${sel.classes[0] ? "." + sel.classes[0] : ""}`;
+    const hasScreenshot = elementScreenshots.get(index) !== false;
+    const comment = elementComments.get(index) || "";
+    
+    const card = document.createElement("div");
+    card.className = "pi-note-card";
+    card.dataset.index = index;
+    card.style.left = `${adjustedPos.x}px`;
+    card.style.top = `${adjustedPos.y}px`;
+    
+    card.innerHTML = `
+      <div class="pi-note-header">
+        <span class="pi-note-badge">${index + 1}</span>
+        <span class="pi-note-selector" title="${escapeHtml(sel.selector)}">${escapeHtml(label)}</span>
+        <button class="pi-note-expand" title="Expand to parent">▲</button>
+        <button class="pi-note-contract" title="Contract to child">▼</button>
+        <button class="pi-note-screenshot ${hasScreenshot ? "active" : ""}" title="Toggle screenshot">📷</button>
+        <button class="pi-note-close" title="Remove element">×</button>
+      </div>
+      <div class="pi-note-body">
+        <textarea class="pi-note-textarea" placeholder="Describe changes for this element...">${escapeHtml(comment)}</textarea>
+      </div>
+    `;
+    
+    // Helper to get current index from DOM (survives reindexing)
+    const getIndex = () => parseInt(card.dataset.index, 10);
+    
+    // Event listeners
+    const textarea = card.querySelector(".pi-note-textarea");
+    textarea.addEventListener("input", () => {
+      elementComments.set(getIndex(), textarea.value);
+      autoResizeTextarea(textarea);
+    });
+    
+    const screenshotBtn = card.querySelector(".pi-note-screenshot");
+    screenshotBtn.addEventListener("click", () => {
+      const idx = getIndex();
+      const current = elementScreenshots.get(idx) !== false;
+      elementScreenshots.set(idx, !current);
+      screenshotBtn.classList.toggle("active", !current);
+    });
+    
+    const closeBtn = card.querySelector(".pi-note-close");
+    closeBtn.addEventListener("click", () => removeElement(getIndex()));
+    
+    const expandBtn = card.querySelector(".pi-note-expand");
+    expandBtn.addEventListener("click", () => expandElement(getIndex()));
+    
+    const contractBtn = card.querySelector(".pi-note-contract");
+    contractBtn.addEventListener("click", () => contractElement(getIndex()));
+    
+    const selectorEl = card.querySelector(".pi-note-selector");
+    selectorEl.addEventListener("click", () => {
+      const idx = getIndex();
+      const currentSel = selectedElements[idx];
+      if (currentSel?.element) scrollToElement(currentSel.element);
+    });
+    
+    // Drag to reposition
+    setupDrag(card);
+    
+    notesContainer.appendChild(card);
+    openNotes.add(index);
+    
+    // Focus textarea
+    textarea.focus();
+    
+    return card;
+  }
+  
+  function toggleNote(index) {
+    if (openNotes.has(index)) {
+      // Close note
+      const card = notesContainer.querySelector(`[data-index="${index}"]`);
+      if (card) card.remove();
+      openNotes.delete(index);
+    } else {
+      // Open note
+      createNoteCard(index);
+    }
+    updateBadges();
+    updateConnectors();
+  }
+  
+  function autoResizeTextarea(textarea) {
+    textarea.style.height = "auto";
+    textarea.style.height = Math.min(160, Math.max(72, textarea.scrollHeight)) + "px";
+  }
+  
+  // ─────────────────────────────────────────────────────────────────────
+  // Drag Handling
+  // ─────────────────────────────────────────────────────────────────────
+  
+  function initDragHandlers() {
+    document.addEventListener("mousemove", handleDragMove);
+    document.addEventListener("mouseup", handleDragEnd);
+  }
+  
+  function cleanupDragHandlers() {
+    document.removeEventListener("mousemove", handleDragMove);
+    document.removeEventListener("mouseup", handleDragEnd);
+  }
+  
+  function handleDragMove(e) {
+    if (!dragState) return;
+    const { card, startX, startY, startLeft, startTop } = dragState;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    const newX = startLeft + dx;
+    const newY = startTop + dy;
+    card.style.left = `${newX}px`;
+    card.style.top = `${newY}px`;
+    const index = parseInt(card.dataset.index, 10);
+    notePositions.set(index, { x: newX, y: newY });
+    updateConnectors();
+  }
+  
+  function handleDragEnd() {
+    if (dragState) {
+      dragState.card.classList.remove("dragging");
+      dragState = null;
+    }
+  }
+  
+  function setupDrag(card) {
+    const header = card.querySelector(".pi-note-header");
+    
+    header.addEventListener("mousedown", (e) => {
+      if (e.target.tagName === "BUTTON" || e.target.tagName === "SPAN") return;
+      dragState = {
+        card,
+        startX: e.clientX,
+        startY: e.clientY,
+        startLeft: card.offsetLeft,
+        startTop: card.offsetTop
+      };
+      card.classList.add("dragging");
+      e.preventDefault();
+    });
+  }
+  
+  // ─────────────────────────────────────────────────────────────────────
+  // Element Management
+  // ─────────────────────────────────────────────────────────────────────
+  
+  function removeElement(index) {
+    selectedElements.splice(index, 1);
+    
+    // Close and remove the note card if open
+    if (openNotes.has(index)) {
+      const card = notesContainer.querySelector(`[data-index="${index}"]`);
+      if (card) card.remove();
+      openNotes.delete(index);
+    }
+    
+    // Reindex all state Maps and Sets
+    const reindexMap = (map) => {
+      const newMap = new Map();
+      map.forEach((v, k) => {
+        if (k < index) newMap.set(k, v);
+        else if (k > index) newMap.set(k - 1, v);
+      });
+      return newMap;
+    };
+    
+    const reindexSet = (set) => {
+      const newSet = new Set();
+      set.forEach(k => {
+        if (k < index) newSet.add(k);
+        else if (k > index) newSet.add(k - 1);
+      });
+      return newSet;
+    };
+    
+    elementScreenshots = reindexMap(elementScreenshots);
+    elementComments = reindexMap(elementComments);
+    notePositions = reindexMap(notePositions);
+    openNotes = reindexSet(openNotes);
+    
+    // Update data-index attributes on remaining note cards
+    notesContainer.querySelectorAll(".pi-note-card").forEach(card => {
+      const cardIndex = parseInt(card.dataset.index, 10);
+      if (cardIndex > index) {
+        const newIndex = cardIndex - 1;
+        card.dataset.index = newIndex;
+        const badge = card.querySelector(".pi-note-badge");
+        if (badge) badge.textContent = newIndex + 1;
+      }
+    });
+    
+    updateBadges();
+    updateConnectors();
+  }
+  
+  function expandElement(index) {
+    const sel = selectedElements[index];
+    if (!sel?.element || !document.contains(sel.element)) return;
+    
+    const parent = sel.element.parentElement;
+    if (parent && parent !== document.body && parent !== document.documentElement) {
+      if (isPiElement(parent)) {
+        console.log("[pi-annotate] Cannot expand to pi-annotate UI element");
+        return;
+      }
+      
+      console.log("[pi-annotate] Expanding to parent:", parent.tagName);
+      selectedElements[index] = createSelectionData(parent);
+      updateNoteCardLabel(index);
+      updateBadges();
+      updateConnectors();
+    } else {
+      console.log("[pi-annotate] Already at root - no valid parent");
+    }
+  }
+  
+  function contractElement(index) {
+    const sel = selectedElements[index];
+    if (!sel?.element || !document.contains(sel.element)) return;
+    
+    const children = Array.from(sel.element.children).filter(c => 
+      c.nodeType === 1 && !isPiElement(c)
+    );
+    
+    if (children.length > 0) {
+      console.log("[pi-annotate] Contracting to child:", children[0].tagName);
+      selectedElements[index] = createSelectionData(children[0]);
+      updateNoteCardLabel(index);
+      updateBadges();
+      updateConnectors();
+    } else {
+      console.log("[pi-annotate] No children to contract to");
+    }
+  }
+  
+  function scrollToElement(element) {
+    if (!element || !document.contains(element)) return;
+    
+    element.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+      inline: "center"
+    });
+    
+    // Flash highlight effect after scroll
+    setTimeout(() => {
+      if (!element || !document.contains(element)) return;
+      
+      const rect = element.getBoundingClientRect();
+      highlightEl.style.display = "";
+      highlightEl.style.left = rect.left + "px";
+      highlightEl.style.top = rect.top + "px";
+      highlightEl.style.width = rect.width + "px";
+      highlightEl.style.height = rect.height + "px";
+      highlightEl.style.transition = "opacity 0.3s";
+      highlightEl.style.opacity = "1";
+      
+      setTimeout(() => {
+        highlightEl.style.opacity = "0";
+        setTimeout(() => {
+          highlightEl.style.display = "none";
+          highlightEl.style.transition = "";
+          highlightEl.style.opacity = "";
+        }, 300);
+      }, 500);
+    }, 400);
+  }
+  
+  function expandAllNotes() {
+    selectedElements.forEach((_, i) => {
+      if (!openNotes.has(i)) {
+        createNoteCard(i);
+      }
+    });
+    updateBadges();
+    updateConnectors();
+  }
+  
+  function collapseAllNotes() {
+    openNotes.forEach(i => {
+      const card = notesContainer.querySelector(`[data-index="${i}"]`);
+      if (card) card.remove();
+    });
+    openNotes.clear();
+    updateBadges();
+    updateConnectors();
+  }
+  
+  // ─────────────────────────────────────────────────────────────────────
+  // UI Updates
+  // ─────────────────────────────────────────────────────────────────────
+  
+  function updateBadges() {
+    if (!markersContainer) return;
+    markersContainer.innerHTML = "";
+    
+    selectedElements.forEach((sel, i) => {
+      if (!sel.element || !document.contains(sel.element)) return;
+      
+      const rect = sel.element.getBoundingClientRect();
+      
+      // Create outline box around selected element
+      const outline = document.createElement("div");
+      outline.className = "pi-marker-outline";
+      outline.style.left = `${rect.left}px`;
+      outline.style.top = `${rect.top}px`;
+      outline.style.width = `${rect.width}px`;
+      outline.style.height = `${rect.height}px`;
+      markersContainer.appendChild(outline);
+      
+      // Create numbered badge
+      const badge = document.createElement("div");
+      badge.className = `pi-marker-badge ${openNotes.has(i) ? "open" : ""}`;
+      badge.dataset.index = i;
+      badge.textContent = i + 1;
+      badge.style.left = `${rect.right - 14}px`;
+      badge.style.top = `${rect.top - 14}px`;
+      
+      badge.addEventListener("click", (e) => {
+        e.stopPropagation();
+        toggleNote(i);
+      });
+      
+      markersContainer.appendChild(badge);
+    });
+    
+    // Update count
+    const countEl = document.getElementById("pi-count");
+    if (countEl) countEl.textContent = `${selectedElements.length} selected`;
+  }
+  
+  function updateConnectors() {
+    if (!connectorsEl) return;
+    connectorsEl.innerHTML = "";
+    
+    selectedElements.forEach((sel, i) => {
+      if (!openNotes.has(i)) return;
+      
+      const card = notesContainer.querySelector(`[data-index="${i}"]`);
+      if (!card || !sel.element || !document.contains(sel.element)) return;
+      
+      const elemRect = sel.element.getBoundingClientRect();
+      const cardRect = card.getBoundingClientRect();
+      
+      const elemCenter = {
+        x: elemRect.left + elemRect.width / 2,
+        y: elemRect.top + elemRect.height / 2
+      };
+      
+      let cardAnchor;
+      if (cardRect.left > elemRect.right) {
+        cardAnchor = { x: cardRect.left, y: cardRect.top + 20 };
+      } else if (cardRect.right < elemRect.left) {
+        cardAnchor = { x: cardRect.right, y: cardRect.top + 20 };
+      } else if (cardRect.top > elemRect.bottom) {
+        cardAnchor = { x: cardRect.left + 20, y: cardRect.top };
+      } else if (cardRect.bottom < elemRect.top) {
+        cardAnchor = { x: cardRect.left + 20, y: cardRect.bottom };
+      } else {
+        return; // Card overlaps element
+      }
+      
+      const midX = (elemCenter.x + cardAnchor.x) / 2;
+      const midY = (elemCenter.y + cardAnchor.y) / 2;
+      
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("class", "pi-connector");
+      path.setAttribute("d", `M ${elemCenter.x},${elemCenter.y} Q ${midX},${midY} ${cardAnchor.x},${cardAnchor.y}`);
+      connectorsEl.appendChild(path);
+      
+      const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      dot.setAttribute("class", "pi-connector-dot");
+      dot.setAttribute("cx", elemCenter.x);
+      dot.setAttribute("cy", elemCenter.y);
+      dot.setAttribute("r", 4);
+      connectorsEl.appendChild(dot);
+    });
+  }
+  
+  function updateHighlight() {
+    const el = elementStack[stackIndex];
+    if (!el) return hideHighlight();
+    
+    const rect = el.getBoundingClientRect();
+    Object.assign(highlightEl.style, {
+      display: "",
+      left: rect.left + "px",
+      top: rect.top + "px",
+      width: rect.width + "px",
+      height: rect.height + "px",
+    });
+  }
+  
+  function hideHighlight() {
+    if (highlightEl) highlightEl.style.display = "none";
+  }
+  
+  function updateTooltip(mx, my) {
+    const el = elementStack[stackIndex];
+    if (!el) return hideTooltip();
+    
+    const rect = el.getBoundingClientRect();
+    const tag = el.tagName.toLowerCase();
+    const id = el.id;
+    const classes = Array.from(el.classList).slice(0, 3);
+    
+    let html = `<span class="tag">${escapeHtml(tag)}</span>`;
+    if (id) html += `<span class="id">#${escapeHtml(id)}</span>`;
+    if (classes.length) html += `<span class="class">.${escapeHtml(classes.join("."))}</span>`;
+    html += `<span class="size">${Math.round(rect.width)}×${Math.round(rect.height)}</span>`;
+    if (elementStack.length > 1) {
+      html += `<span class="hint">▲▼ ${stackIndex + 1}/${elementStack.length}</span>`;
+    }
+    
+    tooltipEl.innerHTML = html;
+    tooltipEl.style.display = "";
+    
+    let tx = mx + 15, ty = my + 15;
+    const tr = tooltipEl.getBoundingClientRect();
+    if (tx + tr.width > window.innerWidth - 10) tx = mx - tr.width - 10;
+    if (ty + tr.height > window.innerHeight - 100) ty = my - tr.height - 10;
+    
+    tooltipEl.style.left = tx + "px";
+    tooltipEl.style.top = ty + "px";
+  }
+  
+  function hideTooltip() {
+    if (tooltipEl) tooltipEl.style.display = "none";
+  }
+  
+  // ─────────────────────────────────────────────────────────────────────
   // Event Handlers
   // ─────────────────────────────────────────────────────────────────────
   
   function onMouseMove(e) {
-    if (!isActive || e.target.closest("#pi-panel")) {
+    if (!isActive || e.target.closest("#pi-panel") || e.target.closest(".pi-note-card")) {
       hideHighlight();
       hideTooltip();
       return;
@@ -714,7 +1386,7 @@
     const el = document.elementFromPoint(e.clientX, e.clientY);
     highlightEl.style.display = "";
     
-    if (!el || el === document.body || el === document.documentElement || el.id?.startsWith("pi-")) {
+    if (!el || el === document.body || el === document.documentElement || isPiElement(el)) {
       hideHighlight();
       hideTooltip();
       return;
@@ -724,7 +1396,7 @@
     elementStack = [];
     let current = el;
     while (current && current !== document.body && current !== document.documentElement) {
-      if (!current.id?.startsWith("pi-")) {
+      if (!isPiElement(current)) {
         elementStack.push(current);
       }
       current = current.parentElement;
@@ -736,7 +1408,7 @@
   }
   
   function onWheel(e) {
-    if (!isActive || !elementStack.length || e.target.closest("#pi-panel")) return;
+    if (!isActive || !elementStack.length || e.target.closest("#pi-panel") || e.target.closest(".pi-note-card")) return;
     
     e.preventDefault();
     e.stopPropagation();
@@ -750,7 +1422,7 @@
   }
   
   function onClick(e) {
-    if (!isActive || e.target.closest("#pi-panel")) return;
+    if (!isActive || e.target.closest("#pi-panel") || e.target.closest(".pi-note-card")) return;
     
     e.preventDefault();
     e.stopPropagation();
@@ -762,26 +1434,28 @@
     
     if (idx >= 0) {
       // Already selected - deselect it
-      selectedElements.splice(idx, 1);
-      // Shift screenshot states for indices after removed element
-      const newMap = new Map();
-      elementScreenshots.forEach((v, k) => {
-        if (k < idx) newMap.set(k, v);
-        else if (k > idx) newMap.set(k - 1, v);
-      });
-      elementScreenshots = newMap;
-    } else {
-      // Not selected - add it
-      const addToExisting = multiSelectMode || e.shiftKey;
-      if (!addToExisting) {
-        selectedElements = [];
-        elementScreenshots = new Map(); // Clear screenshot states too
-      }
-      selectElement(el);
+      removeElement(idx);
+      return;
     }
     
-    updateMarkers();
-    updateChips();
+    // Not selected - add it
+    const addToExisting = multiSelectMode || e.shiftKey;
+    if (!addToExisting) {
+      // Clear existing selections
+      collapseAllNotes();
+      selectedElements = [];
+      elementScreenshots = new Map();
+      elementComments = new Map();
+      notePositions = new Map();
+    }
+    selectElement(el);
+    
+    // Auto-open note for the newly selected element
+    const newIndex = selectedElements.length - 1;
+    createNoteCard(newIndex);
+    
+    updateBadges();
+    updateConnectors();
   }
   
   function onKeyDown(e) {
@@ -790,6 +1464,46 @@
       e.preventDefault();
       handleCancel();
     }
+  }
+  
+  function handleScroll() {
+    updateBadges();
+    updateConnectors();
+  }
+  
+  function handleResize() {
+    updateBadges();
+    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
+    
+    openNotes.forEach(index => {
+      const card = notesContainer.querySelector(`[data-index="${index}"]`);
+      if (!card) return;
+      
+      const rect = card.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      
+      let newX = card.offsetLeft;
+      let newY = card.offsetTop;
+      let moved = false;
+      
+      if (rect.right > vw - 16) {
+        newX = vw - rect.width - 16;
+        moved = true;
+      }
+      if (rect.bottom > vh - panelHeight - 16) {
+        newY = vh - rect.height - panelHeight - 16;
+        moved = true;
+      }
+      
+      if (moved) {
+        card.style.left = `${newX}px`;
+        card.style.top = `${newY}px`;
+        // Update stored position so rebuild uses correct location
+        notePositions.set(index, { x: newX, y: newY });
+      }
+    });
+    updateConnectors();
   }
   
   // ─────────────────────────────────────────────────────────────────────
@@ -839,254 +1553,6 @@
     return attrs;
   }
   
-  // ─────────────────────────────────────────────────────────────────────
-  // UI Updates
-  // ─────────────────────────────────────────────────────────────────────
-  
-  function updateHighlight() {
-    const el = elementStack[stackIndex];
-    if (!el) return hideHighlight();
-    
-    const rect = el.getBoundingClientRect();
-    Object.assign(highlightEl.style, {
-      display: "",
-      left: rect.left + "px",
-      top: rect.top + "px",
-      width: rect.width + "px",
-      height: rect.height + "px",
-    });
-  }
-  
-  function hideHighlight() {
-    if (highlightEl) highlightEl.style.display = "none";
-  }
-  
-  function updateTooltip(mx, my) {
-    const el = elementStack[stackIndex];
-    if (!el) return hideTooltip();
-    
-    const rect = el.getBoundingClientRect();
-    const tag = el.tagName.toLowerCase();
-    const id = el.id;
-    const classes = Array.from(el.classList).slice(0, 3);
-    
-    let html = `<span class="tag">${escapeHtml(tag)}</span>`;
-    if (id) html += `<span class="id">#${escapeHtml(id)}</span>`;
-    if (classes.length) html += `<span class="class">.${escapeHtml(classes.join("."))}</span>`;
-    html += `<span class="size">${Math.round(rect.width)}×${Math.round(rect.height)}</span>`;
-    if (elementStack.length > 1) {
-      html += `<span class="hint">▲▼ ${stackIndex + 1}/${elementStack.length}</span>`;
-    }
-    
-    tooltipEl.innerHTML = html;
-    tooltipEl.style.display = "";
-    
-    let tx = mx + 15, ty = my + 15;
-    const tr = tooltipEl.getBoundingClientRect();
-    if (tx + tr.width > window.innerWidth - 10) tx = mx - tr.width - 10;
-    if (ty + tr.height > window.innerHeight - 100) ty = my - tr.height - 10;
-    
-    tooltipEl.style.left = tx + "px";
-    tooltipEl.style.top = ty + "px";
-    
-    // Also update panel info
-    updateCurrentInfo();
-  }
-  
-  function updateCurrentInfo() {
-    const infoEl = document.getElementById("pi-current-info");
-    const labelEl = document.getElementById("pi-nav-label");
-    if (!infoEl) return;
-    
-    const el = elementStack[stackIndex];
-    if (!el) {
-      infoEl.innerHTML = '<span style="color:#52525b">Hover over element</span>';
-      infoEl.title = "";
-      delete infoEl.dataset.selector;
-      if (labelEl) labelEl.textContent = "-";
-      return;
-    }
-    
-    const tag = el.tagName.toLowerCase();
-    const id = el.id;
-    const classes = Array.from(el.classList).slice(0, 2);
-    
-    let html = `<span class="tag">${escapeHtml(tag)}</span>`;
-    if (id) html += `<span class="id">#${escapeHtml(id)}</span>`;
-    if (classes.length) html += `<span class="class">.${escapeHtml(classes.join("."))}</span>`;
-    
-    infoEl.innerHTML = html;
-    
-    // Build selector for copy and tooltip
-    let selector = tag;
-    if (id) selector += `#${id}`;
-    else if (classes.length) selector += `.${classes.join(".")}`;
-    infoEl.title = `${selector} (click to copy)`;
-    infoEl.dataset.selector = selector;
-    
-    if (labelEl && elementStack.length > 1) {
-      labelEl.textContent = `Level ${stackIndex + 1} of ${elementStack.length}`;
-    } else if (labelEl) {
-      labelEl.textContent = "1 element";
-    }
-  }
-  
-  function copyCurrentSelector() {
-    const infoEl = document.getElementById("pi-current-info");
-    const selector = infoEl?.dataset?.selector;
-    if (!selector) return;
-    
-    navigator.clipboard.writeText(selector).then(() => {
-      infoEl.classList.add("copied");
-      setTimeout(() => infoEl.classList.remove("copied"), 1000);
-    }).catch(() => {
-      // Fallback - select text
-      const range = document.createRange();
-      range.selectNodeContents(infoEl);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-    });
-  }
-  
-  function hideTooltip() {
-    if (tooltipEl) tooltipEl.style.display = "none";
-  }
-  
-  function updateMarkers() {
-    if (!markersContainer) return;
-    pruneStaleSelections();
-    markersContainer.innerHTML = "";
-    
-    selectedElements.forEach((sel, i) => {
-      // Check if element is still in the DOM
-      if (!sel.element || !document.contains(sel.element)) {
-        return;
-      }
-      
-      const rect = sel.element.getBoundingClientRect();
-      const marker = document.createElement("div");
-      marker.className = "pi-marker";
-      marker.style.cssText = `left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px`;
-      
-      const badge = document.createElement("div");
-      badge.className = "pi-marker-badge";
-      badge.textContent = i + 1;
-      marker.appendChild(badge);
-      
-      markersContainer.appendChild(marker);
-    });
-  }
-  
-  function updateChips() {
-    const container = document.getElementById("pi-chips");
-    if (!container) return;
-    pruneStaleSelections();
-    
-    if (!selectedElements.length) {
-      container.innerHTML = '<span class="pi-empty">Click an element on the page to select it</span>';
-      return;
-    }
-    
-    container.innerHTML = selectedElements.map((sel, i) => {
-      const label = sel.id ? `#${sel.id}` : sel.tag + (sel.classes[0] ? `.${sel.classes[0]}` : "");
-      const hasScreenshot = elementScreenshots.get(i) !== false; // Default true
-      return `
-        <div class="pi-chip">
-          <span class="pi-chip-num">${i + 1}</span>
-          <button class="pi-chip-btn screenshot ${hasScreenshot ? 'active' : ''}" data-i="${i}" title="Toggle screenshot for this element">📷</button>
-          <span class="pi-chip-text" title="${escapeHtml(sel.selector)}">${escapeHtml(label)}</span>
-          <span class="pi-chip-btns">
-            <button class="pi-chip-btn expand" data-i="${i}" title="Expand to parent">+</button>
-            <button class="pi-chip-btn contract" data-i="${i}" title="Contract to child">−</button>
-            <button class="pi-chip-btn remove" data-i="${i}" title="Remove">×</button>
-          </span>
-        </div>
-      `;
-    }).join("");
-    
-    container.querySelectorAll(".pi-chip-btn").forEach(btn => {
-      btn.addEventListener("click", e => {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        const button = e.currentTarget;
-        const i = parseInt(button.dataset.i, 10);
-        const sel = selectedElements[i];
-        
-        console.log("[pi-annotate] Chip button clicked:", button.className, "index:", i);
-        
-        if (button.classList.contains("remove")) {
-          selectedElements.splice(i, 1);
-          // Shift screenshot states for indices after removed element
-          const newMap = new Map();
-          elementScreenshots.forEach((v, k) => {
-            if (k < i) newMap.set(k, v);
-            else if (k > i) newMap.set(k - 1, v);
-          });
-          elementScreenshots = newMap;
-          updateMarkers();
-          updateChips();
-          return;
-        }
-        
-        if (button.classList.contains("screenshot")) {
-          const current = elementScreenshots.get(i) !== false;
-          elementScreenshots.set(i, !current);
-          updateChips();
-          return;
-        }
-        
-        if (!sel || !sel.element) {
-          console.log("[pi-annotate] No element reference for index", i);
-          return;
-        }
-        
-        if (button.classList.contains("expand")) {
-          // Expand to parent
-          const parent = sel.element.parentElement;
-          if (parent && parent !== document.body && parent !== document.documentElement && !parent.id?.startsWith("pi-")) {
-            console.log("[pi-annotate] Expanding to parent:", parent.tagName);
-            selectedElements[i] = createSelectionData(parent);
-            updateMarkers();
-            updateChips();
-          } else {
-            console.log("[pi-annotate] No valid parent");
-          }
-        }
-        
-        if (button.classList.contains("contract")) {
-          // Contract to first child
-          const children = Array.from(sel.element.children).filter(c => 
-            c.nodeType === 1 && !c.id?.startsWith("pi-")
-          );
-          if (children.length > 0) {
-            console.log("[pi-annotate] Contracting to child:", children[0].tagName);
-            selectedElements[i] = createSelectionData(children[0]);
-            updateMarkers();
-            updateChips();
-          } else {
-            console.log("[pi-annotate] No valid children");
-          }
-        }
-      });
-    });
-    
-    // Click to copy selector on chip text
-    container.querySelectorAll(".pi-chip-text").forEach(textEl => {
-      textEl.addEventListener("click", e => {
-        e.stopPropagation();
-        const selector = textEl.title;
-        if (!selector) return;
-        
-        navigator.clipboard.writeText(selector).then(() => {
-          textEl.classList.add("copied");
-          setTimeout(() => textEl.classList.remove("copied"), 1000);
-        }).catch(() => {});
-      });
-    });
-  }
-  
   function createSelectionData(el) {
     return {
       element: el,
@@ -1112,20 +1578,48 @@
   
   function pruneStaleSelections() {
     if (!selectedElements.length) return;
+    
     const nextSelections = [];
     const nextScreenshots = new Map();
+    const nextComments = new Map();
+    const nextPositions = new Map();
+    const nextOpenNotes = new Set();
+    
     selectedElements.forEach((sel, i) => {
       if (sel?.element && document.contains(sel.element)) {
         const nextIndex = nextSelections.length;
         nextSelections.push(sel);
+        
         if (elementScreenshots.has(i)) {
           nextScreenshots.set(nextIndex, elementScreenshots.get(i));
         }
+        if (elementComments.has(i)) {
+          nextComments.set(nextIndex, elementComments.get(i));
+        }
+        if (notePositions.has(i)) {
+          nextPositions.set(nextIndex, notePositions.get(i));
+        }
+        if (openNotes.has(i)) {
+          nextOpenNotes.add(nextIndex);
+        }
+      } else if (openNotes.has(i)) {
+        const card = notesContainer?.querySelector(`[data-index="${i}"]`);
+        if (card) card.remove();
       }
     });
+    
     if (nextSelections.length !== selectedElements.length) {
       selectedElements = nextSelections;
       elementScreenshots = nextScreenshots;
+      elementComments = nextComments;
+      notePositions = nextPositions;
+      
+      notesContainer.innerHTML = "";
+      openNotes = new Set();
+      nextOpenNotes.forEach(i => createNoteCard(i));
+      
+      updateBadges();
+      updateConnectors();
     }
   }
   
@@ -1141,23 +1635,19 @@
         
         const rect = element.getBoundingClientRect();
         
-        // Add padding and clamp to viewport
         let minX = Math.max(0, rect.left - SCREENSHOT_PADDING);
         let minY = Math.max(0, rect.top - SCREENSHOT_PADDING);
         let maxX = Math.min(window.innerWidth, rect.right + SCREENSHOT_PADDING);
         let maxY = Math.min(window.innerHeight, rect.bottom + SCREENSHOT_PADDING);
         
-        // Ensure valid dimensions (element may be off-screen)
         const cropW = Math.max(1, (maxX - minX) * dpr);
         const cropH = Math.max(1, (maxY - minY) * dpr);
         
-        // If element is completely off-screen, return full screenshot
         if (maxX <= minX || maxY <= minY) {
           resolve(dataUrl);
           return;
         }
         
-        // Scale for device pixel ratio
         const cropX = minX * dpr;
         const cropY = minY * dpr;
         
@@ -1184,38 +1674,43 @@
   // ─────────────────────────────────────────────────────────────────────
   
   async function handleSubmit() {
-    const prompt = document.getElementById("pi-prompt")?.value?.trim() || "";
+    const context = document.getElementById("pi-context")?.value?.trim() || "";
     
-    // Prepare data (without DOM refs)
+    // Collect comments from note cards
     pruneStaleSelections();
-    const elements = selectedElements.map(({ element, ...rest }) => rest);
+    const elements = selectedElements.map((sel, i) => {
+      const { element, ...rest } = sel;
+      return {
+        ...rest,
+        comment: elementComments.get(i) || ""
+      };
+    });
     
-    // Capture screenshots
-    let screenshot = null; // Full page or null
-    let screenshots = []; // Individual element screenshots [{index, dataUrl}]
+    // Hide UI for screenshot capture
+    hideHighlight();
+    hideTooltip();
+    if (markersContainer) markersContainer.style.display = "none";
+    if (notesContainer) notesContainer.style.display = "none";
+    if (connectorsEl) connectorsEl.style.display = "none";
+    if (panelEl) panelEl.style.display = "none";
+    
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    
+    let screenshot = null;
+    let screenshots = [];
     
     if (screenshotMode !== "none") {
-      hideHighlight();
-      hideTooltip();
-      markersContainer.style.display = "none";
-      panelEl.style.display = "none";
-      
-      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-      
       try {
         const resp = await chrome.runtime.sendMessage({ type: "CAPTURE_SCREENSHOT" });
         if (resp?.dataUrl) {
           const fullScreenshot = resp.dataUrl;
           
           if (screenshotMode === "full") {
-            // Full page mode - single screenshot
             screenshot = fullScreenshot;
           } else {
-            // Individual crops for elements with screenshot enabled
             for (let i = 0; i < selectedElements.length; i++) {
-              const hasScreenshot = elementScreenshots.get(i) !== false; // Default true
+              const hasScreenshot = elementScreenshots.get(i) !== false;
               const element = selectedElements[i].element;
-              // Verify element exists and is still in the DOM
               if (hasScreenshot && element && document.contains(element)) {
                 const cropped = await cropToElement(fullScreenshot, element);
                 screenshots.push({ index: i + 1, dataUrl: cropped });
@@ -1228,16 +1723,15 @@
       }
     }
     
-    // Send to background → native host → Pi
     chrome.runtime.sendMessage({
       type: "ANNOTATIONS_COMPLETE",
       requestId,
       result: {
         success: true,
         elements,
-        screenshot, // Full page screenshot (if fullPage mode)
-        screenshots, // Individual element screenshots [{index, dataUrl}]
-        prompt,
+        screenshot,
+        screenshots,
+        prompt: context,
         url: window.location.href,
         viewport: { width: window.innerWidth, height: window.innerHeight },
       },
@@ -1247,10 +1741,8 @@
   }
   
   function handleCancel() {
-    // Always deactivate locally first
     deactivate();
     
-    // Try to notify Pi (but don't wait or fail if it doesn't work)
     try {
       chrome.runtime.sendMessage({
         type: "CANCEL",
@@ -1262,5 +1754,5 @@
     }
   }
   
-  console.log("[pi-annotate] Content script ready");
+  console.log("[pi-annotate] Content script ready (v0.2.0)");
 })();

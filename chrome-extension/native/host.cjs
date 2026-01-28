@@ -135,6 +135,25 @@ process.on("uncaughtException", (err) => {
 // Unix socket server for Pi extension
 const server = net.createServer((socket) => {
   log("Pi client connected");
+  
+  // If another Pi client is already connected, replace it
+  if (piSocket && !piSocket.destroyed) {
+    if (piAuthed) {
+      log("Replacing existing authenticated Pi client");
+      try {
+        piSocket.write(JSON.stringify({ 
+          type: "SESSION_REPLACED", 
+          reason: "Another terminal started annotation" 
+        }) + "\n");
+      } catch (e) {
+        log(`Error notifying old client: ${e.message}`);
+      }
+    } else {
+      log("Replacing existing unauthenticated Pi client");
+    }
+    piSocket.destroy();
+  }
+  
   piSocket = socket;
   piAuthed = false;
   
@@ -177,7 +196,11 @@ const server = net.createServer((socket) => {
   
   socket.on("close", () => {
     log("Pi client disconnected");
-    piSocket = null;
+    // Only clear if this is still the active socket (handles takeover race)
+    if (piSocket === socket) {
+      piSocket = null;
+      piAuthed = false;
+    }
   });
   
   socket.on("error", (e) => log(`Socket error: ${e.message}`));

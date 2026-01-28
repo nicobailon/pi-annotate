@@ -92,6 +92,7 @@ function connectNative() {
               chrome.tabs.onUpdated.removeListener(listener);
               console.log("[pi-annotate] Navigation timeout - listener removed");
               if (requestId) {
+                requestTabs.delete(requestId);
                 sendToNative({ type: "CANCEL", requestId, reason: "navigation_timeout" });
               }
             }, 30000);

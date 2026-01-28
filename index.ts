@@ -16,12 +16,21 @@ export default function (pi: ExtensionAPI) {
   let pendingRequests = new Map<number, (result: AnnotationResult) => void | Promise<void>>();
   let dataBuffer = ""; // Buffer for incomplete JSON messages
   let authToken: string | null = null;
+  let currentCtx: any = null; // Store current context for status updates
+  
+  // Status helper that uses ctx.ui.setStatus when available
+  function setStatus(message: string) {
+    if (currentCtx?.ui?.setStatus) {
+      currentCtx.ui.setStatus("pi-annotate", message);
+    }
+  }
   
   // ─────────────────────────────────────────────────────────────────────
   // /annotate Command
   // ─────────────────────────────────────────────────────────────────────
   
   const annotateHandler = async (args: string, ctx: any) => {
+    currentCtx = ctx; // Store for status updates
     const url = args.trim() || undefined;
     
     try {
@@ -35,7 +44,6 @@ export default function (pi: ExtensionAPI) {
     const requestId = Date.now();
     sendToHost({
       type: "START_ANNOTATION",
-      id: requestId,
       requestId,
       url,
     });
@@ -71,7 +79,7 @@ export default function (pi: ExtensionAPI) {
       browserSocket = net.createConnection(SOCKET_PATH);
       
       browserSocket.on("connect", () => {
-        console.log("[pi-annotate] Connected to native host");
+        setStatus("Connected to native host");
         sendToHost({ type: "AUTH", token: authToken });
         resolve();
       });
@@ -80,7 +88,7 @@ export default function (pi: ExtensionAPI) {
         // Buffer incoming data and split by newlines
         dataBuffer += data.toString();
         if (dataBuffer.length > MAX_SOCKET_BUFFER) {
-          console.error("[pi-annotate] Socket buffer overflow, closing connection");
+          setStatus("Error: Socket buffer overflow");
           browserSocket?.destroy();
           dataBuffer = "";
           return;
@@ -96,18 +104,18 @@ export default function (pi: ExtensionAPI) {
             const msg = JSON.parse(line);
             void handleMessage(msg);
           } catch (e) {
-            console.error("[pi-annotate] Parse error:", e, "Line length:", line.length);
+            setStatus("Error: Failed to parse message");
           }
         }
       });
       
       browserSocket.on("error", (err) => {
-        console.error("[pi-annotate] Socket error:", err.message);
+        setStatus(`Error: ${err.message}`);
         reject(err);
       });
       
       browserSocket.on("close", () => {
-        console.log("[pi-annotate] Socket closed");
+        setStatus("Disconnected from native host");
         browserSocket = null;
         dataBuffer = ""; // Clear buffer on disconnect
         for (const [, resolvePending] of pendingRequests) {
@@ -142,11 +150,35 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function handleMessage(msg: any) {
-    console.log("[pi-annotate] Received:", msg.type);
-
     if (!isRecord(msg) || typeof msg.type !== "string") return;
+    
+    setStatus(`Received: ${msg.type}`);
 
     const requestId = typeof msg.requestId === "number" ? msg.requestId : null;
+
+    if (msg.type === "SESSION_REPLACED") {
+      // Another terminal took over the annotation session
+      setStatus("Session replaced by another terminal");
+      const reason = typeof msg.reason === "string" ? msg.reason : "Session replaced by another terminal";
+      
+      // Resolve all pending requests with cancelled status
+      for (const [, resolvePending] of pendingRequests) {
+        await resolvePending({
+          success: false,
+          cancelled: true,
+          reason,
+          elements: [],
+          url: "",
+          viewport: { width: 0, height: 0 },
+        });
+      }
+      pendingRequests.clear();
+      
+      // Connection will be destroyed by native host, so clean up
+      browserSocket = null;
+      dataBuffer = "";
+      return;
+    }
 
     if (msg.type === "ANNOTATIONS_COMPLETE") {
       if (!isAnnotationResult(msg.result)) return;
@@ -159,7 +191,7 @@ export default function (pi: ExtensionAPI) {
         // Command flow - inject as user message
         const result = msg.result as AnnotationResult;
         const text = await formatResult(result);
-        console.log("[pi-annotate] Injecting annotation result as user message");
+        setStatus("Annotation complete");
         pi.sendUserMessage(text);
       }
     } else if (msg.type === "CANCEL") {
@@ -185,9 +217,14 @@ export default function (pi: ExtensionAPI) {
   
   async function formatResult(result: AnnotationResult): Promise<string> {
     if (!result.success) {
-      return result.cancelled 
-        ? "Annotation cancelled by user."
-        : `Annotation failed: ${result.reason || "Unknown error"}`;
+      if (result.cancelled) {
+        // Provide meaningful message based on reason
+        if (result.reason?.includes("Another terminal")) {
+          return `Annotation session ended: ${result.reason}`;
+        }
+        return "Annotation cancelled by user.";
+      }
+      return `Annotation failed: ${result.reason || "Unknown error"}`;
     }
     
     let output = `## Page Annotation: ${result.url || "Unknown"}\n`;
@@ -195,8 +232,9 @@ export default function (pi: ExtensionAPI) {
       output += `**Viewport:** ${result.viewport.width}×${result.viewport.height}\n\n`;
     }
     
+    // Show overall context if provided (uses existing 'prompt' field for backwards compat)
     if (result.prompt) {
-      output += `**User's request:** ${result.prompt}\n\n`;
+      output += `**Context:** ${result.prompt}\n\n`;
     }
     
     if (result.elements && result.elements.length > 0) {
@@ -209,7 +247,11 @@ export default function (pi: ExtensionAPI) {
         if (el.text) {
           output += `   - Text: "${el.text}"\n`;
         }
-        output += `   - Size: ${el.rect.width}×${el.rect.height}px\n\n`;
+        output += `   - Size: ${el.rect.width}×${el.rect.height}px\n`;
+        if (el.comment) {
+          output += `   - **Comment:** ${el.comment}\n`;
+        }
+        output += `\n`;
       });
     } else {
       output += "*No elements selected*\n\n";
@@ -279,6 +321,7 @@ export default function (pi: ExtensionAPI) {
     }),
 
     async execute(_toolCallId, params, _onUpdate, ctx, signal) {
+      currentCtx = ctx; // Store for status updates
       const { url, timeout = 300 } = params as { url?: string; timeout?: number };
       const requestId = Date.now();
 
@@ -341,7 +384,6 @@ export default function (pi: ExtensionAPI) {
         // Send start message
         sendToHost({
           type: "START_ANNOTATION",
-          id: requestId,
           requestId,
           url,
         });

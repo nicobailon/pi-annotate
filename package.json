@@ -1,7 +1,7 @@
 {
   "name": "pi-annotate",
-  "version": "0.1.0",
-  "description": "Visual annotation tool for Pi coding agent (simplified)",
+  "version": "0.2.1",
+  "description": "Visual annotation tool for Pi coding agent with inline note cards",
   "type": "module",
   "pi": {
     "extensions": ["./index.ts"]
