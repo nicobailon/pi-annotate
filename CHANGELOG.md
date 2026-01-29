@@ -2,6 +2,32 @@
 
 All notable changes to Pi Annotate.
 
+## [0.3.0] - 2026-01-28
+
+### Added
+- **DevTools-level context capture** — Automatically captures diagnostic info to reduce need for manual DevTools inspection
+- **Box model breakdown** — Content dimensions, padding, border, and margin for each element
+- **Accessibility info** — Role (implicit or explicit), accessible name, description, focusable state, ARIA states
+- **Debug mode toggle** — New "Debug" checkbox in toolbar enables additional captures:
+  - **Computed styles** — 40+ key CSS properties (layout, flex, grid, colors, typography, etc.)
+  - **Parent context** — Parent element's tag, classes, and layout-relevant styles
+  - **CSS variables** — Custom properties used by the element (up to 50)
+- **Full screenshot badges** — When using "Full" screenshot mode, numbered teal badges are now drawn directly on the screenshot at each selected element's position, making it easy to correlate elements with the numbered list in the output
+
+### Changed
+- **Expanded attributes** — Now captures ALL attributes instead of just 8 hardcoded ones
+- **Output format** — Enhanced with box model, attributes, and accessibility in compact format
+
+### Fixed
+- **Attributes not displayed** — Bug fix: `attributes` field was captured but never output in `formatResult()`
+
+### Technical
+- Added `BoxModel`, `AccessibilityInfo`, `ParentContext` interfaces to `types.ts`
+- Added 12 new helper functions with JSDoc annotations in `content.js`
+- CSS variable discovery with recursive rule extraction and caching
+- Reset debug mode and CSS cache in `resetState()`
+- Added `addBadgesToScreenshot()` canvas function for full screenshot badge overlay
+
 ## [0.2.1] - 2026-01-28
 
 ### Added

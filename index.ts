@@ -237,6 +237,12 @@ export default function (pi: ExtensionAPI) {
       output += `**Context:** ${result.prompt}\n\n`;
     }
     
+    // Check if any element has debug data (to show header)
+    const hasDebugData = result.elements?.some(el => el.computedStyles || el.parentContext || el.cssVariables);
+    if (hasDebugData) {
+      output += `**Debug Mode:** Enabled\n\n`;
+    }
+    
     if (result.elements && result.elements.length > 0) {
       output += `### Selected Elements (${result.elements.length})\n\n`;
       result.elements.forEach((el: ElementSelection, i: number) => {
@@ -247,10 +253,70 @@ export default function (pi: ExtensionAPI) {
         if (el.text) {
           output += `   - Text: "${el.text}"\n`;
         }
-        output += `   - Size: ${el.rect.width}×${el.rect.height}px\n`;
+        
+        // Box model (v0.3.0) - compact format
+        if (el.boxModel) {
+          const bm = el.boxModel;
+          const padStr = `${bm.padding.top} ${bm.padding.right} ${bm.padding.bottom} ${bm.padding.left}`;
+          const borderStr = bm.border.top || bm.border.right || bm.border.bottom || bm.border.left
+            ? `${bm.border.top} ${bm.border.right} ${bm.border.bottom} ${bm.border.left}` : "0";
+          const marginStr = `${bm.margin.top} ${bm.margin.right} ${bm.margin.bottom} ${bm.margin.left}`;
+          output += `   - **Box Model:** ${el.rect.width}×${el.rect.height} (content: ${bm.content.width}×${bm.content.height}, padding: ${padStr}, border: ${borderStr}, margin: ${marginStr})\n`;
+        } else {
+          output += `   - Size: ${el.rect.width}×${el.rect.height}px\n`;
+        }
+        
+        // Attributes (v0.3.0) - fix: was captured but never output
+        if (el.attributes && Object.keys(el.attributes).length > 0) {
+          const attrStr = Object.entries(el.attributes)
+            .map(([k, v]) => `${k}="${v}"`)
+            .join(", ");
+          output += `   - **Attributes:** ${attrStr}\n`;
+        }
+        
+        // Accessibility (v0.3.0) - compact format, omit undefined booleans
+        if (el.accessibility) {
+          const a11y = el.accessibility;
+          const parts: string[] = [];
+          if (a11y.role) parts.push(`role=${a11y.role}`);
+          if (a11y.name) parts.push(`name="${a11y.name}"`);
+          parts.push(`focusable=${a11y.focusable}`);
+          parts.push(`disabled=${a11y.disabled}`);
+          if (a11y.expanded !== undefined) parts.push(`expanded=${a11y.expanded}`);
+          if (a11y.pressed !== undefined) parts.push(`pressed=${a11y.pressed}`);
+          if (a11y.checked !== undefined) parts.push(`checked=${a11y.checked}`);
+          if (a11y.selected !== undefined) parts.push(`selected=${a11y.selected}`);
+          if (a11y.description) parts.push(`description="${a11y.description}"`);
+          output += `   - **Accessibility:** ${parts.join(", ")}\n`;
+        }
+        
+        // Comment
         if (el.comment) {
           output += `   - **Comment:** ${el.comment}\n`;
         }
+        
+        // Debug mode data (v0.3.0) - verbose format
+        if (el.computedStyles && Object.keys(el.computedStyles).length > 0) {
+          output += `   - **Computed Styles:**\n`;
+          for (const [key, value] of Object.entries(el.computedStyles)) {
+            output += `     - ${key}: ${value}\n`;
+          }
+        }
+        
+        if (el.parentContext) {
+          const pc = el.parentContext;
+          const pcLabel = pc.id ? `${pc.tag}#${pc.id}` : `${pc.tag}${pc.classes[0] ? "." + pc.classes[0] : ""}`;
+          const pcStyles = Object.entries(pc.styles).map(([k, v]) => `${k}: ${v}`).join(", ");
+          output += `   - **Parent Context:** ${pcLabel} (${pcStyles})\n`;
+        }
+        
+        if (el.cssVariables && Object.keys(el.cssVariables).length > 0) {
+          output += `   - **CSS Variables:**\n`;
+          for (const [name, value] of Object.entries(el.cssVariables)) {
+            output += `     - ${name}: ${value}\n`;
+          }
+        }
+        
         output += `\n`;
       });
     } else {
