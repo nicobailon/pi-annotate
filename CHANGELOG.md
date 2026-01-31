@@ -2,6 +2,17 @@
 
 All notable changes to Pi Annotate.
 
+## [0.3.2] - 2026-01-30
+
+### Added
+- **Always-on key styles** — `display`, `position`, `overflow`, `zIndex`, `opacity`, `color`, `backgroundColor`, `fontSize`, `fontWeight` captured for every element without debug mode
+- **Debug re-capture at submit** — When debug mode is on at submit time, re-captures computed styles, parent context, and CSS variables for ALL selected elements (fixes elements selected before debug was enabled)
+
+### Changed
+- **README rewritten for `pi install`** — Quick Start now uses `pi install github.com/nicobailon/pi-annotate`, paths updated to `~/.pi/agent/git/pi-annotate/`
+- **Key styles suppressed in debug mode** — Compact `**Styles:**` line hidden when full `**Computed Styles:**` dump is present (no duplication)
+- **Default style filtering** — `fontSize: 16px` and `fontWeight: 400` filtered from key styles to reduce noise
+
 ## [0.3.1] - 2026-01-29
 
 ### Fixed

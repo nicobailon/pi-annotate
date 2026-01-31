@@ -70,6 +70,8 @@ export interface ElementSelection {
   boxModel?: BoxModel;
   /** Accessibility info (always captured) */
   accessibility?: AccessibilityInfo;
+  /** Key CSS properties (always captured) */
+  keyStyles?: Record<string, string>;
   /** Computed styles (debug mode only) */
   computedStyles?: Record<string, string>;
   /** Parent context (debug mode only) */

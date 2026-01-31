@@ -1,5 +1,5 @@
 /**
- * Pi Annotate - Content Script (v0.3.1)
+ * Pi Annotate - Content Script (v0.3.2)
  * 
  * DevTools-like element picker with inline note cards:
  * - Hover to highlight elements
@@ -1597,12 +1597,11 @@
       text: (el.textContent || "").slice(0, TEXT_MAX_LENGTH).trim().replace(/\s+/g, " "),
       rect: getRectData(el),
       attributes: getAttrs(el),
-      // Always capture (v0.3.0)
       boxModel: getBoxModel(el),
       accessibility: getAccessibilityInfo(el),
+      keyStyles: getKeyStyles(el),
     };
     
-    // Debug mode captures (v0.3.0)
     if (debugMode) {
       data.computedStyles = getComputedStyles(el);
       data.parentContext = getParentContext(el);
@@ -1851,9 +1850,42 @@
   }
   
   // ─────────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────────
+  // Key Styles (always captured)
+  // ─────────────────────────────────────────────────────────────────────
+
+  const KEY_STYLE_PROPERTIES = [
+    "display", "position", "overflow", "zIndex", "opacity",
+    "color", "backgroundColor", "fontSize", "fontWeight",
+  ];
+
+  const KEY_STYLE_DEFAULTS = new Set([
+    "static", "visible", "1", "auto", "normal",
+    "rgb(0, 0, 0)", "rgba(0, 0, 0, 0)", "transparent",
+    "16px", "400",
+  ]);
+
+  /**
+   * Get a small set of layout-critical CSS properties (always captured)
+   * @param {Element} el - Target element
+   * @returns {Record<string, string>}
+   */
+  function getKeyStyles(el) {
+    const computed = window.getComputedStyle(el);
+    const styles = {};
+    for (const key of KEY_STYLE_PROPERTIES) {
+      const value = computed[key];
+      if (value && !KEY_STYLE_DEFAULTS.has(value)) {
+        styles[key] = value;
+      }
+    }
+    return styles;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
   // Debug Mode Helpers (v0.3.0)
   // ─────────────────────────────────────────────────────────────────────
-  
+
   const COMPUTED_STYLE_KEYS = [
     // Layout
     "display", "position", "top", "right", "bottom", "left",
@@ -2218,8 +2250,19 @@
   async function handleSubmit() {
     const context = document.getElementById("pi-context")?.value?.trim() || "";
     
-    // Collect comments from note cards
+    // Re-capture debug data for all elements if debug mode is on at submit time
+    // (handles elements selected before debug was enabled)
     pruneStaleSelections();
+    if (debugMode) {
+      selectedElements.forEach(sel => {
+        if (sel.element && document.contains(sel.element)) {
+          sel.computedStyles = getComputedStyles(sel.element);
+          sel.parentContext = getParentContext(sel.element);
+          sel.cssVariables = getCSSVariables(sel.element);
+        }
+      });
+    }
+
     const elements = selectedElements.map((sel, i) => {
       const { element, ...rest } = sel;
       return {
@@ -2297,5 +2340,5 @@
     }
   }
   
-  console.log("[pi-annotate] Content script ready (v0.3.1)");
+  console.log("[pi-annotate] Content script ready (v0.3.2)");
 })();

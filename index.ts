@@ -292,6 +292,13 @@ export default function (pi: ExtensionAPI) {
           output += `   - **Accessibility:** ${parts.join(", ")}\n`;
         }
         
+        // Key styles - compact format (suppressed when full computedStyles is present)
+        const hasComputedStyles = el.computedStyles && Object.keys(el.computedStyles).length > 0;
+        if (!hasComputedStyles && el.keyStyles && Object.keys(el.keyStyles).length > 0) {
+          const styleStr = Object.entries(el.keyStyles).map(([k, v]) => `${k}: ${v}`).join(", ");
+          output += `   - **Styles:** ${styleStr}\n`;
+        }
+        
         // Comment
         if (el.comment) {
           output += `   - **Comment:** ${el.comment}\n`;
