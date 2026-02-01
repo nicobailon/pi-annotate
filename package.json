@@ -26,6 +26,7 @@
     "index.ts",
     "types.ts",
     "banner.png",
+    "demo.mp4",
     "chrome-extension/",
     "README.md",
     "CHANGELOG.md",
@@ -34,6 +35,7 @@
   "pi": {
     "extensions": [
       "./index.ts"
-    ]
+    ],
+    "video": "https://github.com/nicobailon/pi-annotate/raw/refs/heads/main/demo.mp4"
   }
 }

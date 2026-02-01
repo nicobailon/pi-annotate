@@ -17,7 +17,7 @@ Figma-like annotation experience with floating inline note cards. DevTools-like 
 
 Click elements, add comments, submit. The agent gets selectors, box model, accessibility, screenshots — everything it needs to fix your UI.
 
-https://github.com/user-attachments/assets/d95396a9-bd11-4632-8456-69fd991959f8
+https://github.com/nicobailon/pi-annotate/raw/refs/heads/main/demo.mp4
 
 ## Quick Start
 
