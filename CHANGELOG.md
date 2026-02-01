@@ -2,6 +2,13 @@
 
 All notable changes to Pi Annotate.
 
+## [0.3.5] - 2026-02-01
+
+### Fixed
+- **Page scrolling blocked** — Scroll wheel was completely hijacked for ancestor cycling; now requires Alt/⌥+scroll, plain scroll passes through to the page
+- **`overflow: auto` silently filtered** — Flat style defaults set matched `"auto"` across properties; `overflow: auto` was hidden because `"auto"` was the default for `zIndex`. Switched to per-property defaults map
+- **`zIndex: 1` silently filtered** — Same issue; `"1"` was the opacity default but also filtered `zIndex: 1`
+
 ## [0.3.4] - 2026-01-31
 
 ### Fixed

@@ -55,7 +55,7 @@ Restart Chrome. The popup will show **Connected** when ready.
 | Action | How |
 |--------|-----|
 | Select element | Click on page |
-| Cycle ancestors | Scroll wheel while hovering |
+| Cycle ancestors | Alt/⌥+scroll while hovering |
 | Multi-select | Toggle "Multi" or Shift+click |
 | Add comment | Type in note card textarea |
 | Toggle screenshot | 📷 button in note card header |
