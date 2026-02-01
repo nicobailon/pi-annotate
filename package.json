@@ -1,6 +1,6 @@
 {
   "name": "pi-annotate",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Visual annotation tool for Pi coding agent with inline note cards",
   "type": "module",
   "author": "Nico Bailon",

@@ -1,9 +1,9 @@
 /**
- * Pi Annotate - Content Script (v0.3.4)
+ * Pi Annotate - Content Script (v0.3.5)
  * 
  * DevTools-like element picker with inline note cards:
  * - Hover to highlight elements
- * - Scroll to cycle through parent elements
+ * - Alt/Option+scroll to cycle through parent elements
  * - Click to select (shift+click for multi)
  * - Per-element floating note cards with comments
  * - Bottom panel for overall context
@@ -26,6 +26,8 @@
   const Z_INDEX_HIGHLIGHT = 2147483645;
   const Z_INDEX_PANEL = 2147483646;
   const Z_INDEX_TOOLTIP = 2147483647;
+  const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+  const ALT_KEY_LABEL = IS_MAC ? "⌥" : "Alt";
   
   // HTML escape to prevent XSS when inserting user-controlled content
   function escapeHtml(str) {
@@ -768,7 +770,7 @@
     panelEl.innerHTML = `
       <div class="pi-header">
         <span class="pi-logo">π Annotate</span>
-        <span class="pi-hint">Click elements • ESC to close</span>
+        <span class="pi-hint">Click elements • ${ALT_KEY_LABEL}+scroll cycles parents • ESC to close</span>
         <button class="pi-close" id="pi-close" title="Close (ESC)">×</button>
       </div>
       <div class="pi-toolbar">
@@ -1376,7 +1378,7 @@
     if (classes.length) html += `<span class="class">.${escapeHtml(classes.join("."))}</span>`;
     html += `<span class="size">${Math.round(rect.width)}×${Math.round(rect.height)}</span>`;
     if (elementStack.length > 1) {
-      html += `<span class="hint">▲▼ ${stackIndex + 1}/${elementStack.length}</span>`;
+      html += `<span class="hint">${ALT_KEY_LABEL}+▲▼ ${stackIndex + 1}/${elementStack.length}</span>`;
     }
     
     tooltipEl.innerHTML = html;
@@ -1434,6 +1436,8 @@
   
   function onWheel(e) {
     if (!isActive || !elementStack.length || e.target.closest("#pi-panel") || e.target.closest(".pi-note-card")) return;
+    
+    if (!e.altKey) return;
     
     e.preventDefault();
     e.stopPropagation();
@@ -1853,16 +1857,16 @@
   // Key Styles (always captured)
   // ─────────────────────────────────────────────────────────────────────
 
-  const KEY_STYLE_PROPERTIES = [
-    "display", "position", "overflow", "zIndex", "opacity",
-    "color", "backgroundColor", "fontSize", "fontWeight",
-  ];
-
-  const KEY_STYLE_DEFAULTS = new Set([
-    "static", "visible", "1", "auto", "normal",
-    "rgb(0, 0, 0)", "rgba(0, 0, 0, 0)", "transparent",
-    "16px", "400",
-  ]);
+  const KEY_STYLE_DEFAULTS = {
+    position: new Set(["static"]),
+    overflow: new Set(["visible"]),
+    zIndex: new Set(["auto"]),
+    opacity: new Set(["1"]),
+    color: new Set(["rgb(0, 0, 0)"]),
+    backgroundColor: new Set(["rgba(0, 0, 0, 0)", "transparent"]),
+    fontSize: new Set(["16px"]),
+    fontWeight: new Set(["400", "normal"]),
+  };
 
   /**
    * Get a small set of layout-critical CSS properties (always captured)
@@ -1872,9 +1876,11 @@
   function getKeyStyles(el) {
     const computed = window.getComputedStyle(el);
     const styles = {};
-    for (const key of KEY_STYLE_PROPERTIES) {
+    const display = computed.display;
+    if (display) styles.display = display;
+    for (const key of Object.keys(KEY_STYLE_DEFAULTS)) {
       const value = computed[key];
-      if (value && !KEY_STYLE_DEFAULTS.has(value)) {
+      if (value && !KEY_STYLE_DEFAULTS[key].has(value)) {
         styles[key] = value;
       }
     }
@@ -2322,5 +2328,5 @@
     }
   }
   
-  console.log("[pi-annotate] Content script ready (v0.3.4)");
+  console.log("[pi-annotate] Content script ready (v0.3.5)");
 })();
