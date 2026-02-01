@@ -1,5 +1,5 @@
 /**
- * Pi Annotate - Content Script (v0.3.2)
+ * Pi Annotate - Content Script (v0.3.4)
  * 
  * DevTools-like element picker with inline note cards:
  * - Hover to highlight elements
@@ -1850,7 +1850,6 @@
   }
   
   // ─────────────────────────────────────────────────────────────────────
-  // ─────────────────────────────────────────────────────────────────────
   // Key Styles (always captured)
   // ─────────────────────────────────────────────────────────────────────
 
@@ -2150,13 +2149,9 @@
    * Add numbered badges to a full-page screenshot for selected elements
    * @param {string} dataUrl - Base64 screenshot data URL
    * @param {Array<{element: Element}>} elements - Selected elements with their DOM references
-   * @param {Object} options - Optional settings
-   * @param {boolean} options.showOutline - Draw outline around elements (default: false)
    * @returns {Promise<string>} Modified screenshot with badges
    */
-  async function addBadgesToScreenshot(dataUrl, elements, options = {}) {
-    const { showOutline = false } = options;
-    
+  async function addBadgesToScreenshot(dataUrl, elements) {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -2179,26 +2174,12 @@
         const fontSize = 13 * dpr;
         const bgColor = "#8abeb7";     // --pi-accent (teal)
         const textColor = "#1d1f21";   // --pi-bg-body (dark)
-        const outlineColor = "#8abeb7"; // --pi-accent
-        const outlineWidth = 2 * dpr;
         
         elements.forEach((sel, i) => {
           const element = sel.element;
           if (!element || !document.contains(element)) return;
           
           const rect = element.getBoundingClientRect();
-          
-          // Optional: draw outline around element
-          if (showOutline) {
-            ctx.strokeStyle = outlineColor;
-            ctx.lineWidth = outlineWidth;
-            ctx.strokeRect(
-              rect.left * dpr,
-              rect.top * dpr,
-              rect.width * dpr,
-              rect.height * dpr
-            );
-          }
           
           // Badge center should be at element's top-right corner (matching DOM badge positioning)
           // DOM: badge.style.left = rect.right - 14, badge.style.top = rect.top - 14
@@ -2327,12 +2308,13 @@
   }
   
   function handleCancel() {
+    const id = requestId;
     deactivate();
     
     try {
       chrome.runtime.sendMessage({
         type: "CANCEL",
-        requestId,
+        requestId: id,
         reason: "user",
       });
     } catch (e) {
@@ -2340,5 +2322,5 @@
     }
   }
   
-  console.log("[pi-annotate] Content script ready (v0.3.2)");
+  console.log("[pi-annotate] Content script ready (v0.3.4)");
 })();

@@ -13,7 +13,7 @@ const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024; // 15MB
 
 export default function (pi: ExtensionAPI) {
   let browserSocket: net.Socket | null = null;
-  let pendingRequests = new Map<number, (result: AnnotationResult) => void | Promise<void>>();
+  const pendingRequests = new Map<number, (result: AnnotationResult) => void | Promise<void>>();
   let dataBuffer = ""; // Buffer for incomplete JSON messages
   let authToken: string | null = null;
   let currentCtx: any = null; // Store current context for status updates
@@ -36,7 +36,7 @@ export default function (pi: ExtensionAPI) {
     try {
       await connectToHost();
     } catch (err) {
-      ctx.ui?.notify("Chrome extension not connected. Make sure Pi Annotate is installed.", "error");
+      ctx.ui?.notify("Chrome extension not connected. Click the Pi Annotate icon in Chrome to wake the service worker, then retry.", "error");
       return;
     }
     
@@ -67,13 +67,11 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      if (!authToken) {
-        try {
-          authToken = fs.readFileSync(TOKEN_PATH, "utf8").trim();
-        } catch (err) {
-          reject(new Error("Missing auth token; is the native host running?"));
-          return;
-        }
+      try {
+        authToken = fs.readFileSync(TOKEN_PATH, "utf8").trim();
+      } catch (err) {
+        reject(new Error("Missing auth token; is the native host running?"));
+        return;
       }
 
       browserSocket = net.createConnection(SOCKET_PATH);
@@ -117,7 +115,8 @@ export default function (pi: ExtensionAPI) {
       browserSocket.on("close", () => {
         setStatus("Disconnected from native host");
         browserSocket = null;
-        dataBuffer = ""; // Clear buffer on disconnect
+        authToken = null;
+        dataBuffer = "";
         for (const [, resolvePending] of pendingRequests) {
           resolvePending({
             success: false,
@@ -405,7 +404,7 @@ export default function (pi: ExtensionAPI) {
         await connectToHost();
       } catch (err) {
         return {
-          content: [{ type: "text", text: "Failed to connect to Chrome extension. Make sure the Pi Annotate extension is installed and the native host is running." }],
+          content: [{ type: "text", text: "Chrome extension not connected. Click the Pi Annotate icon in Chrome to wake the service worker, then retry." }],
           details: { error: "Connection failed" },
         };
       }

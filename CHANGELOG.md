@@ -2,6 +2,22 @@
 
 All notable changes to Pi Annotate.
 
+## [0.3.4] - 2026-01-31
+
+### Fixed
+- **Cancel sends null requestId** — `handleCancel()` now captures `requestId` before calling `deactivate()`, fixing tool-flow cancellations that would hang until timeout
+- **Stale auth token after native host restart** — Token is now re-read from disk on every connection attempt and cleared on socket close, fixing "not connected" errors after Chrome suspends the service worker
+- **Tool error message unhelpful** — Connection failure now says to click the extension icon to wake the service worker instead of generic "make sure it's installed"
+
+### Changed
+- **Removed dead `showOutline` code** — Unused `options` parameter and outline drawing branch removed from `addBadgesToScreenshot`
+
+## [0.3.3] - 2026-01-31
+
+### Changed
+- **Demo video** — Added `demo.mp4` and `pi.video` field for package gallery
+- **Package metadata** — Added keywords, repository, author, bugs, homepage, files list
+
 ## [0.3.2] - 2026-01-30
 
 ### Added
