@@ -394,7 +394,7 @@ export default function (pi: ExtensionAPI) {
       })),
     }),
 
-    async execute(_toolCallId, params, _onUpdate, ctx, signal) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       currentCtx = ctx; // Store for status updates
       const { url, timeout = 300 } = params as { url?: string; timeout?: number };
       const requestId = Date.now();

@@ -2,6 +2,11 @@
 
 All notable changes to Pi Annotate.
 
+## [0.3.6] - 2026-02-01
+
+### Fixed
+- Adapt execute signature to pi v0.51.0: reorder signal, onUpdate, ctx parameters
+
 ## [0.3.5] - 2026-02-01
 
 ### Fixed
