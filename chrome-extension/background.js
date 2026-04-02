@@ -14,7 +14,7 @@ function getRequestId(msg) {
 
 function isRestrictedUrl(url) {
   if (!url) return true;
-  return /^(chrome|chrome-extension|edge|about|devtools|view-source):/.test(url);
+  return /^(chrome|chrome-extension|brave|edge|about|devtools|view-source):/.test(url);
 }
 
 function sendToNative(msg) {

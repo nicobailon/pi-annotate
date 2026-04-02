@@ -1,7 +1,7 @@
 // Pi Annotate - Popup Script
 
 const extId = chrome.runtime.id;
-const installCmd = `./install.sh ${extId}`;
+let installCmd = `./install.sh ${extId}`;
 
 // Elements
 const extIdInput = document.getElementById('ext-id');
@@ -12,22 +12,42 @@ const setupSection = document.getElementById('setup-section');
 const readySection = document.getElementById('ready-section');
 const troubleSection = document.getElementById('trouble-section');
 
-// Populate fields
-extIdInput.value = extId;
-installCmdInput.value = installCmd;
+async function detectBrowser() {
+  try {
+    if (navigator.brave && typeof navigator.brave.isBrave === 'function') {
+      const isBrave = await navigator.brave.isBrave();
+      if (isBrave) return 'brave';
+    }
+  } catch {}
 
-// Platform-aware displays
-const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-const shortcutEl = document.getElementById('shortcut-key');
-if (shortcutEl) {
-  shortcutEl.textContent = isMac ? '⌘ Shift P' : 'Ctrl+Shift+P';
+  const brands = navigator.userAgentData?.brands?.map((b) => b.brand).join(' ') || '';
+  const ua = `${brands} ${navigator.userAgent}`;
+  if (/Brave/i.test(ua)) return 'brave';
+  return 'chrome';
 }
-const quitTipEl = document.getElementById('quit-tip');
-if (quitTipEl) {
-  // Mac has ⌘Q, Windows/Linux don't have a universal quit shortcut
-  quitTipEl.textContent = isMac 
-    ? 'Fully quit Chrome (⌘Q) and reopen' 
-    : 'Fully quit Chrome (menu → Exit) and reopen';
+
+function configureInstallUi(browser) {
+  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+  const browserName = browser === 'brave' ? 'Brave' : 'Chrome';
+
+  installCmd = browser === 'brave'
+    ? `./install.sh ${extId} --browser brave`
+    : `./install.sh ${extId}`;
+
+  extIdInput.value = extId;
+  installCmdInput.value = installCmd;
+
+  const shortcutEl = document.getElementById('shortcut-key');
+  if (shortcutEl) {
+    shortcutEl.textContent = isMac ? '⌘ Shift P' : 'Ctrl+Shift+P';
+  }
+
+  const quitTipEl = document.getElementById('quit-tip');
+  if (quitTipEl) {
+    quitTipEl.textContent = isMac
+      ? `Fully quit ${browserName} (⌘Q) and reopen`
+      : `Fully quit ${browserName} (menu → Exit) and reopen`;
+  }
 }
 
 // Copy functionality
@@ -61,7 +81,7 @@ document.getElementById('copy-cmd').addEventListener('click', (e) => {
 
 // Start annotation button — routes through background script which handles injection
 document.getElementById('start-btn')?.addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type: "TOGGLE_PICKER" });
+  chrome.runtime.sendMessage({ type: 'TOGGLE_PICKER' });
   window.close();
 });
 
@@ -167,5 +187,10 @@ function checkConnection() {
   }
 }
 
-// Check on load
-checkConnection();
+async function init() {
+  const browser = await detectBrowser();
+  configureInstallUi(browser);
+  checkConnection();
+}
+
+void init();

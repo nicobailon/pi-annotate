@@ -29,9 +29,15 @@ pi install npm:pi-annotate
 
 Restart pi to load the extension.
 
-### 2. Load Chrome Extension
+### 2. Load Browser Extension
 
+**Chrome**
 1. Open `chrome://extensions`, enable **Developer mode**
+2. Click **Load unpacked** → select the `chrome-extension/` folder inside the installed package
+3. Click the **Pi Annotate icon** in the toolbar
+
+**Brave**
+1. Open `brave://extensions`, enable **Developer mode**
 2. Click **Load unpacked** → select the `chrome-extension/` folder inside the installed package
 3. Click the **Pi Annotate icon** in the toolbar
 
@@ -40,15 +46,16 @@ Restart pi to load the extension.
 The popup shows your extension ID. Click **Copy** next to the install command, then run it from `chrome-extension/native/` in the installed package:
 
 ```bash
-./install.sh <extension-id>
+./install.sh <extension-id>                 # Chrome
+./install.sh <extension-id> --browser brave # Brave
 ```
 
-Restart Chrome. The popup will show **Connected** when ready.
+Restart your browser. The popup will show **Connected** when ready.
 
 ## Usage
 
 ```bash
-/annotate                  # Current Chrome tab
+/annotate                  # Current browser tab (Chrome or Brave)
 /annotate https://x.com    # Opens URL first
 ```
 
@@ -74,7 +81,7 @@ Restart Chrome. The popup will show **Connected** when ready.
 
 **Screenshots** — Individual crops per element (20px padding) or full-page mode with numbered badges drawn on the screenshot to identify elements. Toggle per element with the 📷 button.
 
-**Restricted Tabs** — If the current tab is `chrome://` or other restricted URLs, providing a URL opens a new tab automatically. Popup button and keyboard shortcut auto-inject the content script on fresh tabs.
+**Restricted Tabs** — If the current tab is `chrome://`, `brave://`, or another restricted URL, providing a URL opens a new tab automatically. Popup button and keyboard shortcut auto-inject the content script on fresh tabs.
 
 ## Output
 
@@ -136,11 +143,11 @@ Auth token generated per-run at `/tmp/pi-annotate.token`. Socket and token files
 
 ## Development
 
-No build step. Edit `content.js` or `background.js` directly, reload at `chrome://extensions`. Pi extension (TypeScript) loads via jiti — restart pi after changes.
+No build step. Edit `content.js` or `background.js` directly, then reload the extension in `chrome://extensions` or `brave://extensions`. Pi extension (TypeScript) loads via jiti — restart pi after changes.
 
 ```bash
 tail -f /tmp/pi-annotate-host.log                    # Native host logs
-# chrome://extensions → Pi Annotate → service worker  # Background logs
+# chrome://extensions or brave://extensions → Pi Annotate → service worker  # Background logs
 # DevTools on target page                              # Content script logs
 ```
 
@@ -154,7 +161,9 @@ tail -f /tmp/pi-annotate-host.log                    # Native host logs
 | "Extension ID mismatch" | Copy install command from popup, re-run |
 | Socket errors | `ls -la /tmp/pi-annotate.sock` |
 
-**Verify native host:** `cat ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.pi.annotate.json`
+**Verify native host:**
+- Chrome: `cat ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.pi.annotate.json`
+- Brave: `cat ~/Library/Application\ Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/com.pi.annotate.json`
 
 ## License
 

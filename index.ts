@@ -36,7 +36,7 @@ export default function (pi: ExtensionAPI) {
     try {
       await connectToHost();
     } catch (err) {
-      ctx.ui?.notify("Chrome extension not connected. Click the Pi Annotate icon in Chrome to wake the service worker, then retry.", "error");
+      ctx.ui?.notify("Browser extension not connected. Click the Pi Annotate icon in Chrome or Brave to wake the service worker, then retry.", "error");
       return;
     }
     
@@ -52,7 +52,7 @@ export default function (pi: ExtensionAPI) {
   };
 
   pi.registerCommand("annotate", {
-    description: "Start visual annotation mode in Chrome. Optionally provide a URL.",
+    description: "Start visual annotation mode in Chrome or Brave. Optionally provide a URL.",
     handler: annotateHandler,
   });
   
@@ -381,13 +381,13 @@ export default function (pi: ExtensionAPI) {
     name: "annotate",
     label: "Annotate",
     description:
-      "Open visual annotation mode in Chrome so the user can click/select elements and add comments. " +
+      "Open visual annotation mode in Chrome or Brave so the user can click/select elements and add comments. " +
       "Only use when the user explicitly asks to annotate, visually point something out, or show you UI issues. " +
       "Returns structured annotations with CSS selectors and element info. " +
-      "If no URL is provided, uses the current active Chrome tab.",
+      "If no URL is provided, uses the current active browser tab.",
     parameters: Type.Object({
       url: Type.Optional(Type.String({
-        description: "URL to annotate. If omitted, uses current Chrome tab.",
+        description: "URL to annotate. If omitted, uses the current browser tab.",
       })),
       timeout: Type.Optional(Type.Number({
         description: "Max seconds to wait for annotations. Default: 300 (5 min)",
@@ -404,7 +404,7 @@ export default function (pi: ExtensionAPI) {
         await connectToHost();
       } catch (err) {
         return {
-          content: [{ type: "text", text: "Chrome extension not connected. Click the Pi Annotate icon in Chrome to wake the service worker, then retry." }],
+          content: [{ type: "text", text: "Browser extension not connected. Click the Pi Annotate icon in Chrome or Brave to wake the service worker, then retry." }],
           details: { error: "Connection failed" },
         };
       }
@@ -463,7 +463,7 @@ export default function (pi: ExtensionAPI) {
         });
         
         if (ctx.hasUI) {
-          ctx.ui.notify("Annotation mode started in Chrome", "info");
+          ctx.ui.notify("Annotation mode started in browser", "info");
         }
       });
     },
