@@ -165,6 +165,19 @@ function connectNative() {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   console.log("[pi-annotate] Message:", msg.type);
   
+  if (msg.type === "ENSURE_NATIVE") {
+    if (!nativePort) {
+      connectNative();
+    }
+    sendResponse?.({ ok: true, connected: !!nativePort });
+    return true;
+  }
+
+  if (msg.type === "GET_NATIVE_STATUS") {
+    sendResponse?.({ connected: !!nativePort });
+    return true;
+  }
+  
   if (msg.type === "TOGGLE_PICKER") {
     togglePicker();
     return;
