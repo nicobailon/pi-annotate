@@ -105,67 +105,36 @@ function setChecking() {
   troubleSection.style.display = 'none';
 }
 
-// Check connection using PING/PONG
+// Nudge the background service worker to establish the native connection
+function ensureBackgroundNative() {
+  try {
+    chrome.runtime.sendMessage({ type: 'ENSURE_NATIVE' }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch {}
+}
+
+// Check connection via background worker, not by opening our own direct native port.
 function checkConnection() {
   setChecking();
-  
-  let resolved = false;
-  let port = null;
-  
-  const cleanup = () => {
-    try { if (port) port.disconnect(); } catch {}
-  };
-  
-  const timeout = setTimeout(() => {
-    if (!resolved) {
-      resolved = true;
-      cleanup();
-      setTrouble('Timeout - native host not responding');
-    }
-  }, 3000);
-  
-  try {
-    port = chrome.runtime.connectNative('com.pi.annotate');
-    
-    port.onDisconnect.addListener(() => {
-      if (resolved) return;
-      resolved = true;
-      clearTimeout(timeout);
-      
-      const error = chrome.runtime.lastError?.message || '';
-      if (error.includes('not found')) {
-        setNotInstalled('Native host not found');
-      } else if (error.includes('forbidden')) {
-        setNotInstalled('Extension ID mismatch - reinstall native host');
-      } else if (error) {
-        setTrouble(error);
-      } else {
-        // Disconnected without error but no PONG received - host may have crashed
-        setTrouble('Native host disconnected unexpectedly');
+  ensureBackgroundNative();
+
+  setTimeout(() => {
+    chrome.runtime.sendMessage({ type: 'GET_NATIVE_STATUS' }, (resp) => {
+      const err = chrome.runtime.lastError?.message || '';
+      if (err) {
+        setTrouble(err);
+        return;
       }
-    });
-    
-    port.onMessage.addListener((msg) => {
-      if (msg?.type === 'PONG') {
-        if (resolved) return;
-        resolved = true;
-        clearTimeout(timeout);
+      if (resp?.connected) {
         setConnected();
-        cleanup();
+      } else {
+        setNotInstalled('Native host not connected yet');
       }
     });
-    
-    // Send PING
-    port.postMessage({ type: 'PING' });
-    
-  } catch (err) {
-    if (resolved) return;
-    resolved = true;
-    clearTimeout(timeout);
-    cleanup();
-    setTrouble(err.message);
-  }
+  }, 300);
 }
 
 // Check on load
+ensureBackgroundNative();
 checkConnection();
