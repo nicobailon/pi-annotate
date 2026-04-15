@@ -2,6 +2,11 @@
 
 All notable changes to Pi Annotate.
 
+## [Unreleased]
+
+### Added
+- **Collapsible bottom panel** — New `▾` / `▴` toggle in the panel header (and `C` keyboard shortcut) shrinks the panel to a header-only strip so footers, sticky action bars, and the last rows of tables remain reachable while the picker is active. The previous behaviour permanently obscured ~96px of page content, forcing users to close the panel entirely to interact with anything underneath. Preference is persisted to `localStorage["pi-annotate:panel-collapsed"]` so the choice sticks per origin. The `C` shortcut is suppressed while the user is typing in an `<input>`, `<textarea>`, or contenteditable element. Note cards reflow automatically when the panel height changes.
+
 ## [0.4.1] - 2026-04-04
 
 ### Changed
