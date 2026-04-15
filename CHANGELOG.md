@@ -2,6 +2,13 @@
 
 All notable changes to Pi Annotate.
 
+## [Unreleased]
+
+### Fixed
+- **Note textarea un-typeable inside modals** — When a page opens a modal backed by a focus-trap library (reka-ui `FocusScope`, radix-ui, `focus-trap`, `@headlessui`, …), the trap's document-level `focusin` listener redirected focus back into the modal the instant pi-annotate's note-card textarea (or the panel's "General context" input) was focused, so typing never reached the textarea. The same mechanism made the note cards silently dismiss modals via `DismissableLayer.usePointerDownOutside` on every click. Two layers of defence: (1) per-element bubble listeners on the note container and panel stop events originating *inside* pi-annotate UI, (2) capture-phase listeners on `document` stop events whose `target` or `relatedTarget` touches pi-annotate UI — this catches the reverse direction (modal input → pi-annotate textarea) where the modal's `focusout` bubbles through the modal's DOM and reaches the trap library before any pi-annotate listener fires. Capture-phase runs before ANY bubble handler regardless of registration order, so the trap library is neutralised even though pi-annotate's content script loads after the page's Vue app mounts. Verified against reka-ui 2.6.2 (shadcn-vue).
+- **Submit / Cancel buttons and the context input un-clickable inside modals** — Modal libraries using `DismissableLayer` with `disableOutsidePointerEvents: true` set `body { pointer-events: none }` while the modal is open to prevent interaction with background content. `#pi-panel` had no explicit `pointer-events` declaration and inherited `none` from `<body>`, making Submit/Cancel and the context input unreachable — `document.elementFromPoint()` at the Submit button's coordinates returned the modal behind it. Added `pointer-events: auto` on `#pi-panel` so the panel's buttons and inputs stay hit-testable. (`.pi-note-card` already had this.)
+- **Crosshair cursor bleeding into pi-annotate UI** — `activate()` sets `document.body.style.cursor = "crosshair"` so the picker is visible over page content. That declaration cascades to ALL body descendants — `#pi-panel` and `.pi-notes-container` had no cursor rule of their own, so the bottom panel chrome, the "General context" input row, and the note-card card bodies all displayed a picker cursor that was meaningless there. Added `cursor: auto` on both containers so they inherit their own defaults; interactive children (buttons, textarea, drag handles) keep overriding with `pointer`/`text`/`grab` as before, and actual page content still shows crosshair for picking.
+
 ## [0.4.1] - 2026-04-04
 
 ### Changed

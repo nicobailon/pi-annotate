@@ -285,8 +285,13 @@
       width: 100%; height: 100%;
       pointer-events: none;
       z-index: ${Z_INDEX_MARKERS};
+      /* Reset inherited crosshair — activate() sets body.cursor:crosshair so
+         the picker is visible over page content; our own UI should use normal
+         arrow/text cursors, not crosshair. Individual interactive children
+         override with their own cursor (pointer, text, grab, …). */
+      cursor: auto;
     }
-    
+
     .pi-note-card {
       position: fixed;
       width: 280px;
@@ -412,6 +417,16 @@
       z-index: ${Z_INDEX_PANEL};
       box-shadow: 0 -4px 24px var(--pi-shadow);
       border-top: 1px solid var(--pi-border-muted);
+      /* Stay clickable when a modal library (reka-ui DismissableLayer,
+         radix-ui, etc.) sets body { pointer-events: none } to disable
+         interaction outside the modal. Without this, Submit/Cancel and
+         the context input inherit pointer-events:none and become
+         unreachable. */
+      pointer-events: auto;
+      /* Reset inherited crosshair — activate() sets body.cursor:crosshair for
+         the picker; the panel is UI chrome, not a picking surface. Interactive
+         children (buttons, inputs, textarea) override with their own cursor. */
+      cursor: auto;
     }
     
     #pi-panel * { box-sizing: border-box; }
@@ -870,10 +885,62 @@
     document.body.appendChild(markersContainer);
   }
   
+  // Shield pi-annotate UI from modal focus traps and dismissable-layer handlers.
+  //
+  // Modal libraries (reka-ui FocusScope, radix-ui, focus-trap, @headlessui, Vuetify
+  // v-overlay with retainFocus, …) attach `focusin` / `focusout` listeners on
+  // `document` and redirect focus back inside the modal the instant it lands
+  // elsewhere. The ORIGINAL bubble-phase fix (`isolateFromFocusTraps`) only caught
+  // events whose `target` is inside pi-annotate UI — it did NOT catch the reverse
+  // direction: when focus moves FROM a modal input TO a pi-annotate textarea, the
+  // modal input fires `focusout` that bubbles through the MODAL's DOM (not ours),
+  // the library sees `relatedTarget` is outside its container, and slams focus
+  // back. Net result: the textarea loses focus before a single keystroke lands.
+  //
+  // Fix: additional CAPTURE-phase listeners on `document`. Capture fires before
+  // ANY bubble listener regardless of registration order, so we can neutralise
+  // the trap library no matter when the page registered its handler. We call
+  // `stopImmediatePropagation()` whenever either `target` OR `relatedTarget`
+  // touches pi-annotate UI — that covers both directions of the focus transition.
+  // For `pointerdown` (DismissableLayer's outside-click dismiss), we only need
+  // `target` inside pi-annotate UI.
+  //
+  // pi-annotate's own document-level picker listeners also use capture phase, but
+  // they short-circuit when the target is pi-annotate UI, so this is additive.
+  function isInsidePiAnnotateUI(node) {
+    if (!(node instanceof Node)) return false;
+    if (notesContainer && notesContainer.contains(node)) return true;
+    if (panelEl && panelEl.contains(node)) return true;
+    return false;
+  }
+  const captureFocusBoundaryGuard = (e) => {
+    if (isInsidePiAnnotateUI(e.target) || isInsidePiAnnotateUI(e.relatedTarget)) {
+      e.stopImmediatePropagation();
+    }
+  };
+  const capturePointerGuard = (e) => {
+    if (isInsidePiAnnotateUI(e.target)) e.stopImmediatePropagation();
+  };
+  document.addEventListener("focusin", captureFocusBoundaryGuard, true);
+  document.addEventListener("focusout", captureFocusBoundaryGuard, true);
+  document.addEventListener("pointerdown", capturePointerGuard, true);
+
+  // Bubble-phase fallback on our own containers. Redundant with the capture-phase
+  // document guards above for modern trap libraries, but kept for belt-and-braces
+  // (e.g. libraries that listen on a modal-local element rather than document).
+  function isolateFromFocusTraps(element) {
+    if (!element) return;
+    const stop = (e) => e.stopPropagation();
+    element.addEventListener("focusin", stop);
+    element.addEventListener("focusout", stop);
+    element.addEventListener("pointerdown", stop);
+  }
+  
   function createNotesContainer() {
     notesContainer = document.createElement("div");
     notesContainer.className = "pi-notes-container";
     document.body.appendChild(notesContainer);
+    isolateFromFocusTraps(notesContainer);
     
     connectorsEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     connectorsEl.setAttribute("class", "pi-connectors");
@@ -975,6 +1042,8 @@
       }
       e.stopPropagation();
     }, true);
+    
+    isolateFromFocusTraps(panelEl);
   }
   
   function setMultiMode(isMulti) {
