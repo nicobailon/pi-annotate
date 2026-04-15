@@ -13,6 +13,9 @@
     "url": "https://github.com/nicobailon/pi-annotate/issues"
   },
   "homepage": "https://github.com/nicobailon/pi-annotate#readme",
+  "scripts": {
+    "test": "node --test chrome-extension/native/host.test.cjs"
+  },
   "keywords": [
     "pi-package",
     "pi",
