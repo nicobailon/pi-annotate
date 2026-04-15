@@ -876,14 +876,49 @@
     document.body.appendChild(markersContainer);
   }
   
-  // Stop focus/pointer events on pi-annotate UI from bubbling to document.
-  // Focus traps in modal libraries (reka-ui FocusScope, radix-ui, focus-trap, etc.)
-  // listen on `document` for `focusin`/`focusout` and, when focus lands outside the
-  // scope, redirect it back — which makes textareas/inputs in our floating UI un-typeable.
-  // Modal "dismiss on outside click" handlers (reka-ui DismissableLayer) likewise
-  // listen on `document` for `pointerdown` and would close the modal on every click
-  // in our UI. pi-annotate's own document-level listeners use capture phase, so
-  // stopping bubble propagation here is safe and does not affect picker logic.
+  // Shield pi-annotate UI from modal focus traps and dismissable-layer handlers.
+  //
+  // Modal libraries (reka-ui FocusScope, radix-ui, focus-trap, @headlessui, Vuetify
+  // v-overlay with retainFocus, …) attach `focusin` / `focusout` listeners on
+  // `document` and redirect focus back inside the modal the instant it lands
+  // elsewhere. The ORIGINAL bubble-phase fix (`isolateFromFocusTraps`) only caught
+  // events whose `target` is inside pi-annotate UI — it did NOT catch the reverse
+  // direction: when focus moves FROM a modal input TO a pi-annotate textarea, the
+  // modal input fires `focusout` that bubbles through the MODAL's DOM (not ours),
+  // the library sees `relatedTarget` is outside its container, and slams focus
+  // back. Net result: the textarea loses focus before a single keystroke lands.
+  //
+  // Fix: additional CAPTURE-phase listeners on `document`. Capture fires before
+  // ANY bubble listener regardless of registration order, so we can neutralise
+  // the trap library no matter when the page registered its handler. We call
+  // `stopImmediatePropagation()` whenever either `target` OR `relatedTarget`
+  // touches pi-annotate UI — that covers both directions of the focus transition.
+  // For `pointerdown` (DismissableLayer's outside-click dismiss), we only need
+  // `target` inside pi-annotate UI.
+  //
+  // pi-annotate's own document-level picker listeners also use capture phase, but
+  // they short-circuit when the target is pi-annotate UI, so this is additive.
+  function isInsidePiAnnotateUI(node) {
+    if (!(node instanceof Node)) return false;
+    if (notesContainer && notesContainer.contains(node)) return true;
+    if (panelEl && panelEl.contains(node)) return true;
+    return false;
+  }
+  const captureFocusBoundaryGuard = (e) => {
+    if (isInsidePiAnnotateUI(e.target) || isInsidePiAnnotateUI(e.relatedTarget)) {
+      e.stopImmediatePropagation();
+    }
+  };
+  const capturePointerGuard = (e) => {
+    if (isInsidePiAnnotateUI(e.target)) e.stopImmediatePropagation();
+  };
+  document.addEventListener("focusin", captureFocusBoundaryGuard, true);
+  document.addEventListener("focusout", captureFocusBoundaryGuard, true);
+  document.addEventListener("pointerdown", capturePointerGuard, true);
+
+  // Bubble-phase fallback on our own containers. Redundant with the capture-phase
+  // document guards above for modern trap libraries, but kept for belt-and-braces
+  // (e.g. libraries that listen on a modal-local element rather than document).
   function isolateFromFocusTraps(element) {
     if (!element) return;
     const stop = (e) => e.stopPropagation();
