@@ -870,10 +870,27 @@
     document.body.appendChild(markersContainer);
   }
   
+  // Stop focus/pointer events on pi-annotate UI from bubbling to document.
+  // Focus traps in modal libraries (reka-ui FocusScope, radix-ui, focus-trap, etc.)
+  // listen on `document` for `focusin`/`focusout` and, when focus lands outside the
+  // scope, redirect it back — which makes textareas/inputs in our floating UI un-typeable.
+  // Modal "dismiss on outside click" handlers (reka-ui DismissableLayer) likewise
+  // listen on `document` for `pointerdown` and would close the modal on every click
+  // in our UI. pi-annotate's own document-level listeners use capture phase, so
+  // stopping bubble propagation here is safe and does not affect picker logic.
+  function isolateFromFocusTraps(element) {
+    if (!element) return;
+    const stop = (e) => e.stopPropagation();
+    element.addEventListener("focusin", stop);
+    element.addEventListener("focusout", stop);
+    element.addEventListener("pointerdown", stop);
+  }
+  
   function createNotesContainer() {
     notesContainer = document.createElement("div");
     notesContainer.className = "pi-notes-container";
     document.body.appendChild(notesContainer);
+    isolateFromFocusTraps(notesContainer);
     
     connectorsEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     connectorsEl.setAttribute("class", "pi-connectors");
@@ -975,6 +992,8 @@
       }
       e.stopPropagation();
     }, true);
+    
+    isolateFromFocusTraps(panelEl);
   }
   
   function setMultiMode(isMulti) {

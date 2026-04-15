@@ -2,6 +2,11 @@
 
 All notable changes to Pi Annotate.
 
+## [Unreleased]
+
+### Fixed
+- **Note textarea un-typeable inside modals** — When a page opens a modal backed by a focus-trap library (reka-ui `FocusScope`, radix-ui, `focus-trap`, `@headlessui`, …), the trap's document-level `focusin` listener redirected focus back into the modal the instant pi-annotate's note-card textarea (or the panel's "General context" input) was focused, so typing never reached the textarea. The same mechanism made the note cards silently dismiss modals via `DismissableLayer.usePointerDownOutside` on every click. The note container and panel now stop `focusin`, `focusout`, and `pointerdown` from bubbling past the pi-annotate UI. pi-annotate's own document listeners are registered in capture phase, so stopping bubble propagation at the UI boundary is safe.
+
 ## [0.4.1] - 2026-04-04
 
 ### Changed
