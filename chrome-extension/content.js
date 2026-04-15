@@ -88,6 +88,17 @@
   let notePositions = new Map();   // index → {x, y} manual position overrides
   let dragState = null;            // { card, startX, startY, startLeft, startTop }
   
+  // Panel collapse state — when true, the bottom panel shrinks to a
+  // header-only strip so the bottom of the page (footers, sticky action bars,
+  // last table row) stays reachable while the picker is active. Toggled via
+  // the ▾/▴ button in the panel header or the "c" key. Persisted across
+  // reloads via localStorage so the preference sticks per site.
+  const PANEL_COLLAPSED_KEY = "pi-annotate:panel-collapsed";
+  let panelCollapsed = (() => {
+    try { return localStorage.getItem(PANEL_COLLAPSED_KEY) === "1"; }
+    catch { return false; }
+  })();
+
   // Debug mode state (v0.3.0)
   let debugMode = false;
   let cachedCSSVarNames = null;    // Cache for CSS variable discovery
@@ -432,7 +443,8 @@
     }
     .pi-hint { color: var(--pi-fg-dim); font-size: 11px; margin-left: auto; }
     
-    .pi-close {
+    .pi-close,
+    .pi-collapse {
       background: none;
       border: none;
       color: var(--pi-fg-dim);
@@ -442,6 +454,32 @@
       line-height: 1;
     }
     .pi-close:hover { color: var(--pi-error); }
+    .pi-collapse {
+      padding: 2px 8px;
+      border-radius: 4px;
+      transition: background-color 120ms ease;
+    }
+    .pi-collapse:hover {
+      color: var(--pi-fg);
+      background: var(--pi-bg-elevated);
+    }
+
+    /* Collapsed panel: hide toolbar/context/actions, remove header divider,
+       drop padding to a minimal strip so the bottom of the page becomes
+       reachable again. */
+    #pi-panel.pi-panel-collapsed {
+      padding: 6px 16px;
+    }
+    #pi-panel.pi-panel-collapsed .pi-header {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+    #pi-panel.pi-panel-collapsed .pi-toolbar,
+    #pi-panel.pi-panel-collapsed .pi-context-row,
+    #pi-panel.pi-panel-collapsed .pi-actions {
+      display: none;
+    }
     
     .pi-toolbar {
       display: flex;
