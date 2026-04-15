@@ -2,6 +2,15 @@
 
 All notable changes to Pi Annotate.
 
+## [Unreleased]
+
+### Fixed
+- **`host-wrapper.sh` no longer shipped in the tarball** — the published package was shipping a pre-built wrapper hardcoded to the publisher's `$HOME` (e.g. `/Users/nicobailon/.pi/agent/extensions/pi-annotate/…`) and to `/opt/homebrew/bin/node`, which didn't exist on most users' machines. Chrome reported "Native host has exited" on every `/annotate` call until the user re-ran `install.sh`. The wrapper is now generated exclusively by `install.sh` on install, is listed in `.npmignore`, and `npm pack` verifies that only `host.cjs` + `install.sh` reach the registry.
+- **`install.sh` picks a stable node path, not an ephemeral fnm/nvm shim** — `which node` under fnm returns `.../fnm_multishells/<pid>_<ts>/bin/node`, which disappears with the shell session and leaves Chrome unable to spawn the host. The installer now asks node itself for `process.execPath` (always the concrete installation) and refuses to record an ephemeral path, printing an actionable hint if it encounters one.
+
+### Added
+- `install.sh --heal` mode regenerates the wrapper only (keeps the existing manifest), for fast recovery after a `npm i -g` update.
+
 ## [0.4.1] - 2026-04-04
 
 ### Changed

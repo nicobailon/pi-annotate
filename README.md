@@ -45,6 +45,13 @@ The popup shows your extension ID. Click **Copy** next to the install command, t
 
 Restart Chrome. The popup will show **Connected** when ready.
 
+> **After a `npm i -g pi-annotate` (or `pi-coding-agent`) update**, the wrapper
+> script at `chrome-extension/native/host-wrapper.sh` is regenerated on your
+> machine via `install.sh` — it embeds an absolute node path and is **not**
+> shipped in the tarball. If you see "Native host has exited" after an update,
+> re-run `./install.sh --heal` (no extension ID needed; keeps the existing
+> manifest).
+
 ## Usage
 
 ```bash
