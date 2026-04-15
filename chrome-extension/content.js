@@ -412,6 +412,12 @@
       z-index: ${Z_INDEX_PANEL};
       box-shadow: 0 -4px 24px var(--pi-shadow);
       border-top: 1px solid var(--pi-border-muted);
+      /* Stay clickable when a modal library (reka-ui DismissableLayer,
+         radix-ui, etc.) sets body { pointer-events: none } to disable
+         interaction outside the modal. Without this, Submit/Cancel and
+         the context input inherit pointer-events:none and become
+         unreachable. */
+      pointer-events: auto;
     }
     
     #pi-panel * { box-sizing: border-box; }

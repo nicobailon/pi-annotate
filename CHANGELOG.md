@@ -6,6 +6,7 @@ All notable changes to Pi Annotate.
 
 ### Fixed
 - **Note textarea un-typeable inside modals** — When a page opens a modal backed by a focus-trap library (reka-ui `FocusScope`, radix-ui, `focus-trap`, `@headlessui`, …), the trap's document-level `focusin` listener redirected focus back into the modal the instant pi-annotate's note-card textarea (or the panel's "General context" input) was focused, so typing never reached the textarea. The same mechanism made the note cards silently dismiss modals via `DismissableLayer.usePointerDownOutside` on every click. The note container and panel now stop `focusin`, `focusout`, and `pointerdown` from bubbling past the pi-annotate UI. pi-annotate's own document listeners are registered in capture phase, so stopping bubble propagation at the UI boundary is safe.
+- **Submit / Cancel buttons and the context input un-clickable inside modals** — Modal libraries using `DismissableLayer` with `disableOutsidePointerEvents: true` set `body { pointer-events: none }` while the modal is open to prevent interaction with background content. `#pi-panel` had no explicit `pointer-events` declaration and inherited `none` from `<body>`, making Submit/Cancel and the context input unreachable — `document.elementFromPoint()` at the Submit button's coordinates returned the modal behind it. Added `pointer-events: auto` on `#pi-panel` so the panel's buttons and inputs stay hit-testable. (`.pi-note-card` already had this.)
 
 ## [0.4.1] - 2026-04-04
 
