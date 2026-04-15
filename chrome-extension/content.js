@@ -285,8 +285,13 @@
       width: 100%; height: 100%;
       pointer-events: none;
       z-index: ${Z_INDEX_MARKERS};
+      /* Reset inherited crosshair — activate() sets body.cursor:crosshair so
+         the picker is visible over page content; our own UI should use normal
+         arrow/text cursors, not crosshair. Individual interactive children
+         override with their own cursor (pointer, text, grab, …). */
+      cursor: auto;
     }
-    
+
     .pi-note-card {
       position: fixed;
       width: 280px;
@@ -418,6 +423,10 @@
          the context input inherit pointer-events:none and become
          unreachable. */
       pointer-events: auto;
+      /* Reset inherited crosshair — activate() sets body.cursor:crosshair for
+         the picker; the panel is UI chrome, not a picking surface. Interactive
+         children (buttons, inputs, textarea) override with their own cursor. */
+      cursor: auto;
     }
     
     #pi-panel * { box-sizing: border-box; }
