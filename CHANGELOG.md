@@ -2,6 +2,11 @@
 
 All notable changes to Pi Annotate.
 
+## [Unreleased]
+
+### Fixed
+- **Zombie native host holding a dangling unix socket** — When Chrome re-woke the extension service worker before the old host's stdin EOF propagated, the new host would blindly unlink the old socket and `listen()` again. The old host kept running with an FS-invisible kernel-level socket, so pi clients connecting by path silently failed with "Chrome extension not connected". The host now uses a pid file at `/tmp/pi-annotate-host.pid` to cooperatively take over from any live previous instance (SIGTERM + 1s grace), scopes its cleanup to files it still owns (prevents a late-arriving cleanup of the stale host from deleting the survivor's files), handles `process.disconnect` in addition to `stdin` EOF, and polls the socket file for external removal (`fs.watchFile`) to exit cleanly if something else unlinks it. Lifecycle is covered by a new `node --test` suite in `chrome-extension/native/host.test.cjs` that runs the exact racing-spawn scenario that used to produce zombies.
+
 ## [0.4.1] - 2026-04-04
 
 ### Changed
