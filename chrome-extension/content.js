@@ -2200,7 +2200,26 @@
     const nextOpenNotes = new Set();
     
     selectedElements.forEach((sel, i) => {
-      if (sel?.element && document.contains(sel.element)) {
+      // If live DOM reference is stale, try to re-resolve by selector (handles SPA re-renders)
+      let el = sel?.element;
+      if (el && !document.contains(el) && sel?.selector) {
+        try {
+          const resolved = document.querySelector(sel.selector);
+          if (resolved) {
+            el = resolved;
+            sel.element = resolved;
+            // Update rect with fresh position
+            const cr = resolved.getBoundingClientRect();
+            sel.rect = {
+              x: Math.round(cr.left + window.scrollX),
+              y: Math.round(cr.top + window.scrollY),
+              width: resolved.offsetWidth,
+              height: resolved.offsetHeight,
+            };
+          }
+        } catch {}
+      }
+      if (el && document.contains(el)) {
         const nextIndex = nextSelections.length;
         nextSelections.push(sel);
         
