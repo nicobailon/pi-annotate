@@ -73,6 +73,8 @@
   let requestId = null;
   let multiSelectMode = false;
   let screenshotMode = "each"; // "each" | "full" | "none"
+  let panelDock = "bottom"; // "bottom" | "top"
+  let panelCollapsed = false;
   
   // Element picker state
   let elementStack = [];
@@ -404,14 +406,34 @@
        ═══════════════════════════════════════════════════════════════════ */
     #pi-panel {
       position: fixed;
-      bottom: 0; left: 0; right: 0;
+      left: 0; right: 0;
       background: var(--pi-bg-card);
       color: var(--pi-fg);
       font-family: var(--pi-font-ui);
       padding: 10px 16px;
       z-index: ${Z_INDEX_PANEL};
+    }
+
+    #pi-panel.pi-panel-bottom {
+      bottom: 0;
       box-shadow: 0 -4px 24px var(--pi-shadow);
       border-top: 1px solid var(--pi-border-muted);
+    }
+
+    #pi-panel.pi-panel-top {
+      top: 0;
+      box-shadow: 0 4px 24px var(--pi-shadow);
+      border-bottom: 1px solid var(--pi-border-muted);
+    }
+
+    #pi-panel.pi-panel-collapsed .pi-panel-body {
+      display: none;
+    }
+
+    #pi-panel.pi-panel-collapsed .pi-header {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: 0;
     }
     
     #pi-panel * { box-sizing: border-box; }
@@ -431,15 +453,25 @@
       color: var(--pi-accent);
     }
     .pi-hint { color: var(--pi-fg-dim); font-size: 11px; margin-left: auto; }
-    
+    .pi-panel-controls { display: flex; align-items: center; gap: 6px; }
+
+    .pi-panel-control,
+    .pi-close {
+      background: var(--pi-bg-elevated);
+      border: 1px solid var(--pi-border-muted);
+      border-radius: var(--pi-radius);
+      color: var(--pi-fg-muted);
+      cursor: pointer;
+      font-size: 11px;
+      line-height: 1;
+      padding: 5px 8px;
+    }
+    .pi-panel-control:hover { color: var(--pi-fg); background: var(--pi-bg-hover); }
     .pi-close {
       background: none;
-      border: none;
-      color: var(--pi-fg-dim);
+      border-color: transparent;
       font-size: 18px;
-      cursor: pointer;
       padding: 0 4px;
-      line-height: 1;
     }
     .pi-close:hover { color: var(--pi-error); }
     
@@ -887,50 +919,59 @@
       <div class="pi-header">
         <span class="pi-logo">π Annotate</span>
         <span class="pi-hint">Click elements • ${ALT_KEY_LABEL}+scroll cycles parents • ESC to close</span>
-        <button class="pi-close" id="pi-close" title="Close (ESC)">×</button>
-      </div>
-      <div class="pi-toolbar">
-        <div class="pi-mode-toggle">
-          <button class="pi-mode-btn active" id="pi-mode-single" title="Click replaces selection">Single</button>
-          <button class="pi-mode-btn" id="pi-mode-multi" title="Click adds to selection">Multi</button>
+        <div class="pi-panel-controls">
+          <button class="pi-panel-control" id="pi-dock-toggle" title="Move panel to top or bottom">Dock top</button>
+          <button class="pi-panel-control" id="pi-collapse-toggle" title="Collapse or expand the annotation controls">Collapse</button>
+          <button class="pi-close" id="pi-close" title="Close (ESC)">×</button>
         </div>
-        <div class="pi-screenshot-toggle">
-          <span class="pi-toggle-label">Screenshot</span>
-          <button class="pi-ss-btn active" id="pi-ss-each" title="Crop screenshot to each element">Crop</button>
-          <button class="pi-ss-btn" id="pi-ss-full" title="Capture entire viewport">Full</button>
-          <button class="pi-ss-btn" id="pi-ss-none" title="No screenshots">None</button>
+      </div>
+      <div class="pi-panel-body">
+        <div class="pi-toolbar">
+          <div class="pi-mode-toggle">
+            <button class="pi-mode-btn active" id="pi-mode-single" title="Click replaces selection">Single</button>
+            <button class="pi-mode-btn" id="pi-mode-multi" title="Click adds to selection">Multi</button>
+          </div>
+          <div class="pi-screenshot-toggle">
+            <span class="pi-toggle-label">Screenshot</span>
+            <button class="pi-ss-btn active" id="pi-ss-each" title="Crop screenshot to each element">Crop</button>
+            <button class="pi-ss-btn" id="pi-ss-full" title="Capture entire viewport">Full</button>
+            <button class="pi-ss-btn" id="pi-ss-none" title="No screenshots">None</button>
+          </div>
+          <div class="pi-spacer"></div>
+          <span class="pi-count" id="pi-count">0 selected</span>
+          <label class="pi-notes-toggle" title="Show/hide all note cards">
+            <input type="checkbox" id="pi-notes-visible" checked />
+            <span>Notes</span>
+          </label>
+          <label class="pi-notes-toggle" title="Capture computed styles, layout, and CSS variables">
+            <input type="checkbox" id="pi-debug-mode" />
+            <span>Debug</span>
+          </label>
+          <label class="pi-notes-toggle pi-etch-toggle" title="Record DevTools edits (style, class, CSS rule changes)">
+            <input type="checkbox" id="pi-etch-mode" />
+            <span>Etch</span>
+            <span class="pi-etch-badge" id="pi-etch-count" style="display:none"></span>
+          </label>
         </div>
-        <div class="pi-spacer"></div>
-        <span class="pi-count" id="pi-count">0 selected</span>
-        <label class="pi-notes-toggle" title="Show/hide all note cards">
-          <input type="checkbox" id="pi-notes-visible" checked />
-          <span>Notes</span>
-        </label>
-        <label class="pi-notes-toggle" title="Capture computed styles, layout, and CSS variables">
-          <input type="checkbox" id="pi-debug-mode" />
-          <span>Debug</span>
-        </label>
-        <label class="pi-notes-toggle pi-etch-toggle" title="Record DevTools edits (style, class, CSS rule changes)">
-          <input type="checkbox" id="pi-etch-mode" />
-          <span>Etch</span>
-          <span class="pi-etch-badge" id="pi-etch-count" style="display:none"></span>
-        </label>
-      </div>
-      <div class="pi-context-row">
-        <input type="text" id="pi-context" placeholder="General context (optional)..." />
-      </div>
-      <div class="pi-actions">
-        <div class="pi-buttons">
-          <button class="pi-btn pi-btn-cancel" id="pi-cancel">Cancel</button>
-          <button class="pi-btn pi-btn-submit" id="pi-submit">Submit</button>
+        <div class="pi-context-row">
+          <input type="text" id="pi-context" placeholder="General context (optional)..." />
+        </div>
+        <div class="pi-actions">
+          <div class="pi-buttons">
+            <button class="pi-btn pi-btn-cancel" id="pi-cancel">Cancel</button>
+            <button class="pi-btn pi-btn-submit" id="pi-submit">Submit</button>
+          </div>
         </div>
       </div>
     `;
     document.body.appendChild(panelEl);
+    applyPanelState();
     
     document.getElementById("pi-close").addEventListener("click", handleCancel);
     document.getElementById("pi-cancel").addEventListener("click", handleCancel);
     document.getElementById("pi-submit").addEventListener("click", handleSubmit);
+    document.getElementById("pi-dock-toggle").addEventListener("click", () => setPanelDock(panelDock === "bottom" ? "top" : "bottom"));
+    document.getElementById("pi-collapse-toggle").addEventListener("click", () => setPanelCollapsed(!panelCollapsed));
     
     // Mode toggle
     document.getElementById("pi-mode-single").addEventListener("click", () => setMultiMode(false));
@@ -977,6 +1018,42 @@
     }, true);
   }
   
+  function getPanelReservedHeight(edge) {
+    if (!panelEl || panelEl.classList.contains("pi-panel-collapsed") && panelDock !== edge) return 0;
+    return panelDock === edge ? panelEl.offsetHeight || 0 : 0;
+  }
+
+  function applyPanelState() {
+    if (!panelEl) return;
+    panelEl.classList.toggle("pi-panel-top", panelDock === "top");
+    panelEl.classList.toggle("pi-panel-bottom", panelDock === "bottom");
+    panelEl.classList.toggle("pi-panel-collapsed", panelCollapsed);
+
+    const dockBtn = document.getElementById("pi-dock-toggle");
+    if (dockBtn) {
+      dockBtn.textContent = panelDock === "bottom" ? "Dock top" : "Dock bottom";
+      dockBtn.title = panelDock === "bottom" ? "Move panel to the top" : "Move panel to the bottom";
+    }
+
+    const collapseBtn = document.getElementById("pi-collapse-toggle");
+    if (collapseBtn) {
+      collapseBtn.textContent = panelCollapsed ? "Expand" : "Collapse";
+      collapseBtn.title = panelCollapsed ? "Show annotation controls" : "Hide annotation controls";
+    }
+
+    handleResize();
+  }
+
+  function setPanelDock(dock) {
+    panelDock = dock === "top" ? "top" : "bottom";
+    applyPanelState();
+  }
+
+  function setPanelCollapsed(collapsed) {
+    panelCollapsed = Boolean(collapsed);
+    applyPanelState();
+  }
+
   function setMultiMode(isMulti) {
     multiSelectMode = isMulti;
     const singleBtn = document.getElementById("pi-mode-single");
@@ -1007,27 +1084,30 @@
     const rect = element.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
+    const bottomReserve = getPanelReservedHeight("bottom");
+    const topReserve = getPanelReservedHeight("top");
     const margin = 16;
+    const minY = margin + topReserve;
+    const maxY = vh - bottomReserve;
     
     // Try right side first
     if (rect.right + margin + cardWidth < vw) {
-      return { x: rect.right + margin, y: Math.max(margin, rect.top) };
+      return { x: rect.right + margin, y: Math.max(minY, rect.top) };
     }
     // Try left side
     if (rect.left - margin - cardWidth > 0) {
-      return { x: rect.left - margin - cardWidth, y: Math.max(margin, rect.top) };
+      return { x: rect.left - margin - cardWidth, y: Math.max(minY, rect.top) };
     }
     // Try below
-    if (rect.bottom + margin + cardHeight < vh - panelHeight) {
+    if (rect.bottom + margin + cardHeight < maxY) {
       return { x: Math.max(margin, rect.left), y: rect.bottom + margin };
     }
     // Try above
-    if (rect.top - margin - cardHeight > 0) {
+    if (rect.top - margin - cardHeight > minY) {
       return { x: Math.max(margin, rect.left), y: rect.top - margin - cardHeight };
     }
     // Fallback: offset from element
-    return { x: Math.min(rect.right + margin, vw - cardWidth - margin), y: Math.max(margin, rect.top) };
+    return { x: Math.min(rect.right + margin, vw - cardWidth - margin), y: Math.max(minY, rect.top) };
   }
   
   function hasOverlap(rect1, rect2, margin = 8) {
@@ -1071,9 +1151,10 @@
     // Clamp to viewport
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
+    const bottomReserve = getPanelReservedHeight("bottom");
+    const topReserve = getPanelReservedHeight("top");
     adjusted.x = Math.max(16, Math.min(adjusted.x, vw - cardSize.width - 16));
-    adjusted.y = Math.max(16, Math.min(adjusted.y, vh - cardSize.height - panelHeight - 16));
+    adjusted.y = Math.max(16 + topReserve, Math.min(adjusted.y, vh - cardSize.height - bottomReserve - 16));
     
     return adjusted;
   }
@@ -1634,7 +1715,8 @@
   
   function handleResize() {
     updateBadges();
-    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
+    const bottomReserve = getPanelReservedHeight("bottom");
+    const topReserve = getPanelReservedHeight("top");
     
     openNotes.forEach(index => {
       const card = notesContainer.querySelector(`[data-index="${index}"]`);
@@ -1652,8 +1734,12 @@
         newX = vw - rect.width - 16;
         moved = true;
       }
-      if (rect.bottom > vh - panelHeight - 16) {
-        newY = vh - rect.height - panelHeight - 16;
+      if (rect.bottom > vh - bottomReserve - 16) {
+        newY = vh - rect.height - bottomReserve - 16;
+        moved = true;
+      }
+      if (rect.top < topReserve + 16) {
+        newY = topReserve + 16;
         moved = true;
       }
       
