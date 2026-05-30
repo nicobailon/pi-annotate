@@ -103,6 +103,7 @@
   let etchTextInitials = new Map();      // Text node → initial text value
   let etchChildListMutations = [];       // raw MutationRecords for structural changes
   let etchChangeCount = 0;
+  let isMinimized = false;
   
   // DOM elements
   let highlightEl = null;
@@ -412,6 +413,7 @@
       z-index: ${Z_INDEX_PANEL};
       box-shadow: 0 -4px 24px var(--pi-shadow);
       border-top: 1px solid var(--pi-border-muted);
+      transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), right 0.3s cubic-bezier(0.4, 0, 0.2, 1), bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-radius 0.3s cubic-bezier(0.4, 0, 0.2, 1), padding 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
     
     #pi-panel * { box-sizing: border-box; }
@@ -443,6 +445,55 @@
     }
     .pi-close:hover { color: var(--pi-error); }
     
+    .pi-minimize {
+      background: none;
+      border: none;
+      color: var(--pi-fg-dim);
+      font-size: 18px;
+      cursor: pointer;
+      padding: 0 4px;
+      line-height: 1;
+      transition: color 0.15s;
+    }
+    .pi-minimize:hover { color: var(--pi-accent); }
+
+    .pi-restore {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      height: 24px;
+      cursor: pointer;
+      padding: 0;
+      border: none;
+      background: none;
+      color: var(--pi-fg-muted);
+      font: inherit;
+    }
+
+    #pi-panel.pi-minimized {
+      left: auto;
+      right: 16px;
+      bottom: 16px;
+      width: auto;
+      border-radius: 24px;
+      padding: 8px 14px;
+      border: 1px solid var(--pi-border-muted);
+      box-shadow: 0 4px 16px var(--pi-shadow);
+    }
+    #pi-panel.pi-minimized:hover {
+      border-color: var(--pi-accent);
+      background: var(--pi-bg-elevated);
+    }
+    #pi-panel.pi-minimized .pi-header,
+    #pi-panel.pi-minimized .pi-toolbar,
+    #pi-panel.pi-minimized .pi-context-row,
+    #pi-panel.pi-minimized .pi-actions {
+      display: none;
+    }
+    #pi-panel.pi-minimized .pi-restore {
+      display: flex;
+    }
     .pi-toolbar {
       display: flex;
       align-items: center;
@@ -735,6 +786,8 @@
     multiSelectMode = false;
     screenshotMode = "each";
     debugMode = false;
+    isMinimized = false;
+    if (panelEl) panelEl.classList.remove("pi-minimized");
     resetCSSVarCache();
     etchMode = false;
     etchStartTime = null;
@@ -832,6 +885,7 @@
     multiSelectMode = false;
     screenshotMode = "each";
     debugMode = false;
+    isMinimized = false;
     resetCSSVarCache();
     etchMode = false;
     etchStartTime = null;
@@ -884,9 +938,15 @@
     panelEl = document.createElement("div");
     panelEl.id = "pi-panel";
     panelEl.innerHTML = `
+      <button class="pi-restore" id="pi-restore" aria-label="Expand panel">
+        <span class="pi-logo">π</span>
+        <span class="pi-count" id="pi-mini-count">0 selected</span>
+        <span title="Expand panel">▲</span>
+      </button>
       <div class="pi-header">
         <span class="pi-logo">π Annotate</span>
         <span class="pi-hint">Click elements • ${ALT_KEY_LABEL}+scroll cycles parents • ESC to close</span>
+        <button class="pi-minimize" id="pi-minimize" title="Minimize panel" aria-label="Minimize panel">−</button>
         <button class="pi-close" id="pi-close" title="Close (ESC)">×</button>
       </div>
       <div class="pi-toolbar">
@@ -929,6 +989,14 @@
     document.body.appendChild(panelEl);
     
     document.getElementById("pi-close").addEventListener("click", handleCancel);
+    document.getElementById("pi-minimize").addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleMinimize();
+    });
+    document.getElementById("pi-restore").addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleMinimize();
+    });
     document.getElementById("pi-cancel").addEventListener("click", handleCancel);
     document.getElementById("pi-submit").addEventListener("click", handleSubmit);
     
@@ -973,6 +1041,9 @@
       if (target.tagName === "BUTTON" || target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
         return;
       }
+      if (target.closest(".pi-restore")) {
+        return;
+      }
       e.stopPropagation();
     }, true);
   }
@@ -1007,7 +1078,9 @@
     const rect = element.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
+    const panelHeight = isMinimized
+      ? 48
+      : (document.getElementById("pi-panel")?.offsetHeight || 96);
     const margin = 16;
     
     // Try right side first
@@ -1071,7 +1144,9 @@
     // Clamp to viewport
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
+    const panelHeight = isMinimized
+      ? 48
+      : (document.getElementById("pi-panel")?.offsetHeight || 96);
     adjusted.x = Math.max(16, Math.min(adjusted.x, vw - cardSize.width - 16));
     adjusted.y = Math.max(16, Math.min(adjusted.y, vh - cardSize.height - panelHeight - 16));
     
@@ -1428,6 +1503,7 @@
     // Update count
     const countEl = document.getElementById("pi-count");
     if (countEl) countEl.textContent = `${selectedElements.length} selected`;
+    updateMiniCount();
   }
   
   function updateConnectors() {
@@ -1634,7 +1710,9 @@
   
   function handleResize() {
     updateBadges();
-    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
+    const panelHeight = isMinimized
+      ? 48
+      : (document.getElementById("pi-panel")?.offsetHeight || 96);
     
     openNotes.forEach(index => {
       const card = notesContainer.querySelector(`[data-index="${index}"]`);
@@ -2188,6 +2266,28 @@
    */
   function resetCSSVarCache() {
     cachedCSSVarNames = null;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Minimize / Restore
+  // ─────────────────────────────────────────────────────────────────────
+
+  function toggleMinimize() {
+    isMinimized = !isMinimized;
+    if (isMinimized) {
+      panelEl.classList.add("pi-minimized");
+    } else {
+      panelEl.classList.remove("pi-minimized");
+    }
+    updateMiniCount();
+    updateBadges();
+    updateConnectors();
+    handleResize();
+  }
+
+  function updateMiniCount() {
+    const el = document.getElementById("pi-mini-count");
+    if (el) el.textContent = `${selectedElements.length} selected`;
   }
   
   function pruneStaleSelections() {
