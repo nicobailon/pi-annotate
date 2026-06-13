@@ -51,7 +51,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       await connectToHost(remoteBridge ? {
-        socketPath: remoteBridge.socketPath,
+        endpoint: remoteBridge.endpoint,
         token: remoteBridge.token,
         label: `Browser Host ${parsed.browserHost}`,
       } : undefined);
@@ -507,7 +507,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         await connectToHost(remoteBridge ? {
-          socketPath: remoteBridge.socketPath,
+          endpoint: remoteBridge.endpoint,
           token: remoteBridge.token,
           label: `Browser Host ${browserHost}`,
         } : undefined);

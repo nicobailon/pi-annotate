@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 const net = require("net");
 const fs = require("fs");
+const crypto = require("crypto");
 
-const SOCKET_PATH = "/tmp/pi-annotate.sock";
-const TOKEN_PATH = "/tmp/pi-annotate.token";
-const LOG_FILE = "/tmp/pi-annotate-host.log";
+const SOCKET_PATH = process.env.PI_ANNOTATE_SOCKET_PATH || "/tmp/pi-annotate.sock";
+const TOKEN_PATH = process.env.PI_ANNOTATE_TOKEN_PATH || "/tmp/pi-annotate.token";
+const LOG_FILE = process.env.PI_ANNOTATE_LOG_FILE || "/tmp/pi-annotate-host.log";
 const MAX_NATIVE_MESSAGE_BYTES = 32 * 1024 * 1024; // 32MB (increased from 8MB for edit capture payloads)
 const MAX_SOCKET_BUFFER = 32 * 1024 * 1024; // 32MB
 const MAX_LOG_BYTES = 5 * 1024 * 1024; // 5MB
+const AUTH_TIMEOUT_MS = 5000;
 
 process.umask(0o077);
 
@@ -43,13 +45,12 @@ try {
   reportFsError(`Failed to remove old socket ${SOCKET_PATH}`, err);
 }
 
-// Store connected pi client
+// Store connected authenticated pi client
 let piSocket = null;
-let piAuthed = false;
 
 function ensureToken() {
   try {
-    const token = require("crypto").randomBytes(32).toString("hex");
+    const token = crypto.randomBytes(32).toString("hex");
     fs.writeFileSync(TOKEN_PATH, token, { mode: 0o600 });
     return token;
   } catch (err) {
@@ -59,6 +60,13 @@ function ensureToken() {
 }
 
 const AUTH_TOKEN = ensureToken();
+
+function tokenMatches(value) {
+  if (!AUTH_TOKEN || typeof value !== "string") return false;
+  const expected = Buffer.from(AUTH_TOKEN, "utf8");
+  const provided = Buffer.from(value, "utf8");
+  return expected.length === provided.length && crypto.timingSafeEqual(expected, provided);
+}
 
 // Native messaging I/O
 let inputBuffer = Buffer.alloc(0);
@@ -159,9 +167,20 @@ process.on("uncaughtException", (err) => {
 const server = net.createServer((socket) => {
   log("Pi client connected");
   
-  // If another Pi client is already connected, replace it
-  if (piSocket && !piSocket.destroyed) {
-    if (piAuthed) {
+  let buffer = "";
+  let authed = false;
+  const authTimeout = setTimeout(() => {
+    if (!authed) {
+      log("Pi client authentication timed out");
+      socket.destroy();
+    }
+  }, AUTH_TIMEOUT_MS);
+
+  const promoteAuthenticatedSocket = () => {
+    clearTimeout(authTimeout);
+    authed = true;
+
+    if (piSocket && piSocket !== socket && !piSocket.destroyed) {
       log("Replacing existing authenticated Pi client");
       try {
         piSocket.write(JSON.stringify({ 
@@ -171,16 +190,12 @@ const server = net.createServer((socket) => {
       } catch (e) {
         log(`Error notifying old client: ${e.message}`);
       }
-    } else {
-      log("Replacing existing unauthenticated Pi client");
+      piSocket.destroy();
     }
-    piSocket.destroy();
-  }
-  
-  piSocket = socket;
-  piAuthed = false;
-  
-  let buffer = "";
+
+    piSocket = socket;
+    log("Pi client authenticated");
+  };
   
   socket.on("data", (data) => {
     buffer += data.toString();
@@ -197,10 +212,9 @@ const server = net.createServer((socket) => {
       if (!line.trim()) continue;
       try {
         const msg = JSON.parse(line);
-        if (!piAuthed) {
-          if (msg?.type === "AUTH" && AUTH_TOKEN && msg.token === AUTH_TOKEN) {
-            piAuthed = true;
-            log("Pi client authenticated");
+        if (!authed) {
+          if (msg?.type === "AUTH" && tokenMatches(msg.token)) {
+            promoteAuthenticatedSocket();
           } else {
             log("Pi client authentication failed");
             socket.destroy();
@@ -218,11 +232,11 @@ const server = net.createServer((socket) => {
   });
   
   socket.on("close", () => {
+    clearTimeout(authTimeout);
     log("Pi client disconnected");
     // Only clear if this is still the active socket (handles takeover race)
     if (piSocket === socket) {
       piSocket = null;
-      piAuthed = false;
     }
   });
   

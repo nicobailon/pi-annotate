@@ -50,6 +50,36 @@ test("createHostConnectionManager cleans up a replaced Browser Host connection w
   assert.deepEqual(disconnects, ["lost", "lost"]);
 });
 
+test("createHostConnectionManager connects to TCP endpoints for remote Browser Hosts", async () => {
+  // Arrange
+  const socket = new FakeSocket();
+  const endpoints = [];
+  const manager = createHostConnectionManager({
+    defaultSocketPath: "/tmp/pi-annotate.sock",
+    defaultTokenPath: "/tmp/pi-annotate.token",
+    maxSocketBuffer: 1024,
+    createConnection: (endpoint) => {
+      endpoints.push(endpoint);
+      return socket;
+    },
+    onMessage: () => {},
+    onConnectionLost: () => {},
+  });
+
+  // Act
+  const connect = manager.connect({
+    endpoint: { type: "tcp", host: "127.0.0.1", port: 49152 },
+    token: "remote-token",
+    label: "Browser Host laptop",
+  });
+  socket.emit("connect");
+  await connect;
+
+  // Assert
+  assert.deepEqual(endpoints, [{ type: "tcp", host: "127.0.0.1", port: 49152 }]);
+  assert.deepEqual(socket.writes, [{ type: "AUTH", token: "remote-token" }]);
+});
+
 test("createHostConnectionManager ignores stale data from a previous socket after switching", async () => {
   // Arrange
   const firstSocket = new FakeSocket();

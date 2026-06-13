@@ -150,13 +150,13 @@ Debug mode adds computed styles, parent context, and CSS variables per element. 
 
 ```
 Pi Extension (index.ts)
-    ↕ Unix Socket (/tmp/pi-annotate.sock)
+    ↕ Unix Socket (/tmp/pi-annotate.sock) or remote 127.0.0.1 TCP SSH tunnel
 Native Host (host.cjs)
     ↕ Browser Native Messaging
 Browser Extension (background.js → content.js)
 ```
 
-Remote annotation keeps the browser-side bridge unchanged. The Pi extension creates temporary SSH tunnels to the Browser Host's existing native host socket, and creates an additional page-access tunnel only when the requested page URL is loopback.
+Remote annotation keeps the browser-side bridge unchanged. The Pi extension creates a temporary SSH TCP loopback tunnel from the Pi Session Host to the Browser Host's existing native host Unix socket, and creates an additional page-access tunnel only when the requested page URL is loopback. This supports Windows as a Pi Session Host for remote annotation to Linux/macOS Browser Hosts; Windows Browser Hosts are not supported yet because the native host still uses a Unix socket on the Browser Host.
 
 | File | Purpose |
 |------|---------|

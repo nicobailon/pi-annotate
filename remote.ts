@@ -1,14 +1,18 @@
 import { execFile, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+import * as net from "node:net";
+import { randomInt } from "node:crypto";
+import type { HostEndpoint } from "./host-connection.ts";
 
 export const REMOTE_SOCKET_PATH = "/tmp/pi-annotate.sock";
 export const REMOTE_TOKEN_PATH = "/tmp/pi-annotate.token";
 
 const SSH_READY_TIMEOUT_MS = 5000;
 const SSH_TUNNEL_TIMEOUT_MS = 7000;
+const SSH_TUNNEL_ATTEMPTS = 20;
+const LOOPBACK_HOST = "127.0.0.1" as const;
+const EPHEMERAL_PORT_MIN = 49152;
+const EPHEMERAL_PORT_MAX_EXCLUSIVE = 65536;
 
 export type RemoteAnnotationErrorCode =
   | "SSH_HOST_KEY_FAILED"
@@ -47,9 +51,17 @@ export interface RemotePageAccessPlan {
   tunnel: RemotePageAccessTunnel | null;
 }
 
+export interface SshTunnelArgsOptions {
+  browserHost: string;
+  localPort: number;
+  pageTunnel: RemotePageAccessTunnel | null;
+}
+
 export interface RemoteAnnotationBridge {
   browserHost: string;
-  socketPath: string;
+  endpoint: HostEndpoint;
+  /** @deprecated Remote bridges now use endpoint. Present only for older internal callers. */
+  socketPath?: string;
   token: string;
   url?: string;
   pageTunnel: RemotePageAccessTunnel | null;
@@ -137,17 +149,36 @@ export function planRemotePageAccess(rawUrl: string | undefined, browserPort: nu
 
   const parsed = new URL(rawUrl);
   const targetPort = Number.parseInt(parsed.port || defaultPortForProtocol(parsed.protocol), 10);
-  parsed.hostname = "127.0.0.1";
+  parsed.hostname = LOOPBACK_HOST;
   parsed.port = String(browserPort);
 
   return {
     url: parsed.toString(),
     tunnel: {
-      targetHost: "127.0.0.1",
+      targetHost: LOOPBACK_HOST,
       targetPort,
       browserPort,
     },
   };
+}
+
+export function buildSshTunnelArgs({ browserHost, localPort, pageTunnel }: SshTunnelArgsOptions): string[] {
+  const args = [
+    ...sshBaseArgs(),
+    "-o", "ExitOnForwardFailure=yes",
+    "-N",
+    "-L", `${LOOPBACK_HOST}:${localPort}:${REMOTE_SOCKET_PATH}`,
+  ];
+
+  if (pageTunnel) {
+    args.push(
+      "-R",
+      `${LOOPBACK_HOST}:${pageTunnel.browserPort}:${pageTunnel.targetHost}:${pageTunnel.targetPort}`
+    );
+  }
+
+  args.push(browserHost);
+  return args;
 }
 
 function normalizeHostname(hostname: string): string {
@@ -183,14 +214,6 @@ function execFileText(file: string, args: string[], options: { timeout?: number;
 
 function sshBaseArgs(): string[] {
   return ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5"];
-}
-
-function shellQuote(value: unknown): string {
-  return `'${String(value).replaceAll("'", "'\\''")}'`;
-}
-
-export function buildRemoteNodeEvalCommand(script: string): string {
-  return `node -e ${shellQuote(script)}`;
 }
 
 export function classifySshFailure(detail: unknown): SshFailureClassification | null {
@@ -251,43 +274,17 @@ async function readRemoteToken(browserHost: string): Promise<string> {
   }
 }
 
-async function pickRemoteBrowserPort(browserHost: string): Promise<number> {
-  const script = "const net=require('node:net');const s=net.createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close();});";
-  const stdout = await execFileText("ssh", [
-    ...sshBaseArgs(),
-    browserHost,
-    buildRemoteNodeEvalCommand(script),
-  ]);
-  const port = Number.parseInt(stdout.trim(), 10);
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    throw new RemoteAnnotationError("REMOTE_PORT_UNAVAILABLE", `Could not allocate a Browser Host port on '${browserHost}'.`);
-  }
-  return port;
+function randomEphemeralPort(): number {
+  return randomInt(EPHEMERAL_PORT_MIN, EPHEMERAL_PORT_MAX_EXCLUSIVE);
 }
 
-function safeHostPart(host: string): string {
-  return String(host).replace(/[^a-zA-Z0-9_.-]+/g, "_").slice(0, 60) || "host";
-}
-
-function makeLocalSocketPath(browserHost: string): string {
-  return path.join(os.tmpdir(), `pi-annotate-${process.pid}-${Date.now()}-${safeHostPart(browserHost)}.sock`);
-}
-
-function unlinkIfExists(filePath: string): void {
-  try {
-    fs.unlinkSync(filePath);
-  } catch (err) {
-    if (isNodeError(err) && err.code === "ENOENT") return;
-    throw err;
-  }
-}
-
-function waitForLocalSocket(proc: ChildProcess, socketPath: string, timeoutMs: number): Promise<void> {
+function waitForLocalTcpEndpoint(proc: ChildProcess, endpoint: Extract<HostEndpoint, { type: "tcp" }>, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
     let stderr = "";
     let intervalId: NodeJS.Timeout | undefined;
     let timeoutId: NodeJS.Timeout | undefined;
+    const probes = new Set<net.Socket>();
 
     const cleanup = () => {
       if (intervalId) clearInterval(intervalId);
@@ -295,6 +292,8 @@ function waitForLocalSocket(proc: ChildProcess, socketPath: string, timeoutMs: n
       proc.off("error", onError);
       proc.off("exit", onExit);
       proc.stderr?.off("data", onStderr);
+      for (const probe of probes) probe.destroy();
+      probes.clear();
     };
 
     const finishResolve = () => {
@@ -330,20 +329,31 @@ function waitForLocalSocket(proc: ChildProcess, socketPath: string, timeoutMs: n
       ));
     };
 
+    const probe = () => {
+      const socket = net.createConnection({ host: endpoint.host, port: endpoint.port });
+      probes.add(socket);
+      socket.once("connect", () => {
+        probes.delete(socket);
+        socket.destroy();
+        finishResolve();
+      });
+      socket.once("error", () => {
+        probes.delete(socket);
+        socket.destroy();
+      });
+    };
+
     proc.stderr?.on("data", onStderr);
     proc.once("error", onError);
     proc.once("exit", onExit);
 
-    intervalId = setInterval(() => {
-      if (fs.existsSync(socketPath)) {
-        finishResolve();
-      }
-    }, 50);
+    intervalId = setInterval(probe, 50);
+    probe();
 
     timeoutId = setTimeout(() => {
       finishReject(new RemoteAnnotationError(
         "SSH_TUNNEL_TIMEOUT",
-        `Timed out waiting for SSH tunnel socket '${socketPath}'. ${stderr.trim()}`.trim()
+        `Timed out waiting for SSH tunnel TCP endpoint '${endpoint.host}:${endpoint.port}'. ${stderr.trim()}`.trim()
       ));
     }, timeoutMs);
   });
@@ -356,61 +366,54 @@ export async function createRemoteAnnotationBridge({ browserHost, url }: { brows
   }
 
   const token = await readRemoteToken(browserHost);
-  let browserUrl = url;
-  let pageAccess: RemotePageAccessPlan = { url, tunnel: null };
+  let lastError: unknown;
 
-  if (isLoopbackPageUrl(url)) {
-    const browserPort = await pickRemoteBrowserPort(browserHost);
-    pageAccess = planRemotePageAccess(url, browserPort);
-    browserUrl = pageAccess.url;
-  }
+  for (let attempt = 1; attempt <= SSH_TUNNEL_ATTEMPTS; attempt += 1) {
+    const localPort = randomEphemeralPort();
+    const endpoint: Extract<HostEndpoint, { type: "tcp" }> = { type: "tcp", host: LOOPBACK_HOST, port: localPort };
+    let browserUrl = url;
+    let pageAccess: RemotePageAccessPlan = { url, tunnel: null };
 
-  const socketPath = makeLocalSocketPath(browserHost);
-  unlinkIfExists(socketPath);
+    if (isLoopbackPageUrl(url)) {
+      const browserPort = randomEphemeralPort();
+      pageAccess = planRemotePageAccess(url, browserPort);
+      browserUrl = pageAccess.url;
+    }
 
-  const args = [
-    ...sshBaseArgs(),
-    "-o", "ExitOnForwardFailure=yes",
-    "-o", "StreamLocalBindUnlink=yes",
-    "-N",
-    "-L", `${socketPath}:${REMOTE_SOCKET_PATH}`,
-  ];
+    const proc = spawn("ssh", buildSshTunnelArgs({ browserHost, localPort, pageTunnel: pageAccess.tunnel }), {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
 
-  if (pageAccess.tunnel) {
-    args.push(
-      "-R",
-      `127.0.0.1:${pageAccess.tunnel.browserPort}:${pageAccess.tunnel.targetHost}:${pageAccess.tunnel.targetPort}`
-    );
-  }
-
-  args.push(browserHost);
-
-  const proc = spawn("ssh", args, { stdio: ["ignore", "ignore", "pipe"] });
-
-  try {
-    await waitForLocalSocket(proc, socketPath, SSH_TUNNEL_TIMEOUT_MS);
-  } catch (err) {
-    proc.kill("SIGTERM");
-    unlinkIfExists(socketPath);
-    throw err;
-  }
-
-  let cleaned = false;
-  return {
-    browserHost,
-    socketPath,
-    token,
-    url: browserUrl,
-    pageTunnel: pageAccess.tunnel,
-    cleanup() {
-      if (cleaned) return;
-      cleaned = true;
+    try {
+      await waitForLocalTcpEndpoint(proc, endpoint, SSH_TUNNEL_TIMEOUT_MS);
+      let cleaned = false;
+      return {
+        browserHost,
+        endpoint,
+        token,
+        url: browserUrl,
+        pageTunnel: pageAccess.tunnel,
+        cleanup() {
+          if (cleaned) return;
+          cleaned = true;
+          proc.kill("SIGTERM");
+        },
+      };
+    } catch (err) {
       proc.kill("SIGTERM");
-      unlinkIfExists(socketPath);
-    },
-  };
+      lastError = err;
+      if (attempt < SSH_TUNNEL_ATTEMPTS && isRetryableTunnelStartupError(err)) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new RemoteAnnotationError("REMOTE_PORT_UNAVAILABLE", `Could not allocate tunnel ports for '${browserHost}'.`);
 }
 
-function isNodeError(err: unknown): err is NodeJS.ErrnoException {
-  return !!err && typeof err === "object" && "code" in err;
+function isRetryableTunnelStartupError(err: unknown): boolean {
+  if (!(err instanceof RemoteAnnotationError)) return false;
+  if (err.code !== "SSH_TUNNEL_FAILED" && err.code !== "SSH_TUNNEL_TIMEOUT") return false;
+  return /Address already in use|bind|cannot listen|port forwarding failed|remote port forwarding failed|Timed out/i.test(err.message);
 }

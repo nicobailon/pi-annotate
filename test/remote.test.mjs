@@ -4,7 +4,7 @@ import fc from "fast-check";
 
 import {
   RemoteAnnotationError,
-  buildRemoteNodeEvalCommand,
+  buildSshTunnelArgs,
   classifySshFailure,
   isLoopbackPageUrl,
   parseAnnotateCommandArgs,
@@ -184,12 +184,34 @@ test("classifySshFailure separates SSH failures from Browser Host readiness", ()
   assert.equal(classifySshFailure("cat: /tmp/pi-annotate.token: No such file or directory"), null);
 });
 
-test("buildRemoteNodeEvalCommand shell-quotes node scripts for ssh remote execution", () => {
-  const script = "const net=require('node:net');s.listen(0,'127.0.0.1',()=>{});";
-  assert.equal(
-    buildRemoteNodeEvalCommand(script),
-    String.raw`node -e 'const net=require('\''node:net'\'');s.listen(0,'\''127.0.0.1'\'',()=>{});'`
-  );
+test("buildSshTunnelArgs uses a local TCP forward to the Browser Host Unix socket", () => {
+  assert.deepEqual(buildSshTunnelArgs({ browserHost: "laptop", localPort: 49152, pageTunnel: null }), [
+    "-o", "BatchMode=yes",
+    "-o", "ConnectTimeout=5",
+    "-o", "ExitOnForwardFailure=yes",
+    "-N",
+    "-L", "127.0.0.1:49152:/tmp/pi-annotate.sock",
+    "laptop",
+  ]);
+});
+
+test("buildSshTunnelArgs adds explicit loopback reverse forwards without remote node commands", () => {
+  const args = buildSshTunnelArgs({
+    browserHost: "laptop",
+    localPort: 49153,
+    pageTunnel: { targetHost: "127.0.0.1", targetPort: 3000, browserPort: 49154 },
+  });
+
+  assert.deepEqual(args, [
+    "-o", "BatchMode=yes",
+    "-o", "ConnectTimeout=5",
+    "-o", "ExitOnForwardFailure=yes",
+    "-N",
+    "-L", "127.0.0.1:49153:/tmp/pi-annotate.sock",
+    "-R", "127.0.0.1:49154:127.0.0.1:3000",
+    "laptop",
+  ]);
+  assert.equal(args.some((arg) => /node|-e|StreamLocalBindUnlink/.test(arg)), false);
 });
 
 // Helpers
