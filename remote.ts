@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -9,15 +10,62 @@ export const REMOTE_TOKEN_PATH = "/tmp/pi-annotate.token";
 const SSH_READY_TIMEOUT_MS = 5000;
 const SSH_TUNNEL_TIMEOUT_MS = 7000;
 
+export type RemoteAnnotationErrorCode =
+  | "SSH_HOST_KEY_FAILED"
+  | "SSH_AUTH_FAILED"
+  | "SSH_HOST_UNRESOLVED"
+  | "SSH_CONNECT_FAILED"
+  | "BROWSER_HOST_NOT_READY"
+  | "REMOTE_IPV6_LOOPBACK_UNSUPPORTED"
+  | "REMOTE_PORT_UNAVAILABLE"
+  | "SSH_TUNNEL_FAILED"
+  | "SSH_TUNNEL_TIMEOUT";
+
+export interface ParsedAnnotateCommandArgs {
+  browserHost?: string;
+  url?: string;
+}
+
+export interface SshFailureClassification {
+  code: Extract<RemoteAnnotationErrorCode,
+    | "SSH_HOST_KEY_FAILED"
+    | "SSH_AUTH_FAILED"
+    | "SSH_HOST_UNRESOLVED"
+    | "SSH_CONNECT_FAILED">;
+  message: string;
+}
+
+export interface RemotePageAccessTunnel {
+  targetHost: "127.0.0.1";
+  targetPort: number;
+  browserPort: number;
+}
+
+export interface RemotePageAccessPlan {
+  url?: string;
+  tunnel: RemotePageAccessTunnel | null;
+}
+
+export interface RemoteAnnotationBridge {
+  browserHost: string;
+  socketPath: string;
+  token: string;
+  url?: string;
+  pageTunnel: RemotePageAccessTunnel | null;
+  cleanup: () => void;
+}
+
 export class RemoteAnnotationError extends Error {
-  constructor(code, message, options = {}) {
+  code: RemoteAnnotationErrorCode;
+
+  constructor(code: RemoteAnnotationErrorCode, message: string, options: ErrorOptions = {}) {
     super(message, options);
     this.name = "RemoteAnnotationError";
     this.code = code;
   }
 }
 
-export function parseAnnotateCommandArgs(args) {
+export function parseAnnotateCommandArgs(args: string | undefined): ParsedAnnotateCommandArgs {
   const trimmed = (args || "").trim();
   if (!trimmed) return { browserHost: undefined, url: undefined };
 
@@ -32,13 +80,13 @@ export function parseAnnotateCommandArgs(args) {
   };
 }
 
-export function isUrlLike(value) {
+export function isUrlLike(value: unknown): value is string {
   return typeof value === "string" && /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
 }
 
-export function isLoopbackPageUrl(rawUrl) {
+export function isLoopbackPageUrl(rawUrl: unknown): rawUrl is string {
   if (!rawUrl || typeof rawUrl !== "string") return false;
-  let parsed;
+  let parsed: URL;
   try {
     parsed = new URL(rawUrl);
   } catch {
@@ -48,15 +96,31 @@ export function isLoopbackPageUrl(rawUrl) {
   return isLoopbackHostname(parsed.hostname);
 }
 
-export function isLoopbackHostname(hostname) {
-  if (!hostname) return false;
-  const h = hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+export function isLoopbackHostname(hostname: unknown): hostname is string {
+  if (typeof hostname !== "string" || !hostname) return false;
+  const h = normalizeHostname(hostname);
   return h === "localhost" || h === "::1" || /^127(?:\.\d{1,3}){3}$/.test(h);
 }
 
-export function planRemotePageAccess(rawUrl, browserPort) {
+export function isIpv6LoopbackPageUrl(rawUrl: unknown): rawUrl is string {
+  if (!rawUrl || typeof rawUrl !== "string") return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  return normalizeHostname(parsed.hostname) === "::1";
+}
+
+export function planRemotePageAccess(rawUrl: string | undefined, browserPort: number): RemotePageAccessPlan {
   if (!isLoopbackPageUrl(rawUrl)) {
     return { url: rawUrl, tunnel: null };
+  }
+
+  if (isIpv6LoopbackPageUrl(rawUrl)) {
+    throw unsupportedRemoteIpv6LoopbackError();
   }
 
   const parsed = new URL(rawUrl);
@@ -73,11 +137,22 @@ export function planRemotePageAccess(rawUrl, browserPort) {
   };
 }
 
-function defaultPortForProtocol(protocol) {
+function normalizeHostname(hostname: string): string {
+  return hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+}
+
+function unsupportedRemoteIpv6LoopbackError(): RemoteAnnotationError {
+  return new RemoteAnnotationError(
+    "REMOTE_IPV6_LOOPBACK_UNSUPPORTED",
+    "Remote annotation does not support IPv6 loopback page URLs such as http://[::1]:3000. Use localhost or 127.0.0.1 from the Pi Session Host, or omit the URL to annotate the Browser Host's current tab."
+  );
+}
+
+function defaultPortForProtocol(protocol: string): string {
   return protocol === "https:" ? "443" : "80";
 }
 
-function execFileText(file, args, options = {}) {
+function execFileText(file: string, args: string[], options: { timeout?: number; maxBuffer?: number } = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(file, args, {
       timeout: options.timeout ?? SSH_READY_TIMEOUT_MS,
@@ -93,19 +168,19 @@ function execFileText(file, args, options = {}) {
   });
 }
 
-function sshBaseArgs() {
+function sshBaseArgs(): string[] {
   return ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5"];
 }
 
-function shellQuote(value) {
+function shellQuote(value: unknown): string {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
-export function buildRemoteNodeEvalCommand(script) {
+export function buildRemoteNodeEvalCommand(script: string): string {
   return `node -e ${shellQuote(script)}`;
 }
 
-export function classifySshFailure(detail) {
+export function classifySshFailure(detail: unknown): SshFailureClassification | null {
   const text = String(detail || "");
   if (/Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED|No .* host key is known/i.test(text)) {
     return {
@@ -134,7 +209,7 @@ export function classifySshFailure(detail) {
   return null;
 }
 
-async function readRemoteToken(browserHost) {
+async function readRemoteToken(browserHost: string): Promise<string> {
   try {
     const token = await execFileText("ssh", [
       ...sshBaseArgs(),
@@ -163,7 +238,7 @@ async function readRemoteToken(browserHost) {
   }
 }
 
-async function pickRemoteBrowserPort(browserHost) {
+async function pickRemoteBrowserPort(browserHost: string): Promise<number> {
   const script = "const net=require('node:net');const s=net.createServer();s.listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close();});";
   const stdout = await execFileText("ssh", [
     ...sshBaseArgs(),
@@ -177,28 +252,29 @@ async function pickRemoteBrowserPort(browserHost) {
   return port;
 }
 
-function safeHostPart(host) {
+function safeHostPart(host: string): string {
   return String(host).replace(/[^a-zA-Z0-9_.-]+/g, "_").slice(0, 60) || "host";
 }
 
-function makeLocalSocketPath(browserHost) {
+function makeLocalSocketPath(browserHost: string): string {
   return path.join(os.tmpdir(), `pi-annotate-${process.pid}-${Date.now()}-${safeHostPart(browserHost)}.sock`);
 }
 
-function unlinkIfExists(filePath) {
+function unlinkIfExists(filePath: string): void {
   try {
     fs.unlinkSync(filePath);
   } catch (err) {
-    if (err?.code !== "ENOENT") throw err;
+    if (isNodeError(err) && err.code === "ENOENT") return;
+    throw err;
   }
 }
 
-function waitForLocalSocket(proc, socketPath, timeoutMs) {
+function waitForLocalSocket(proc: ChildProcess, socketPath: string, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
     let stderr = "";
-    let intervalId;
-    let timeoutId;
+    let intervalId: NodeJS.Timeout | undefined;
+    let timeoutId: NodeJS.Timeout | undefined;
 
     const cleanup = () => {
       if (intervalId) clearInterval(intervalId);
@@ -208,27 +284,34 @@ function waitForLocalSocket(proc, socketPath, timeoutMs) {
       proc.stderr?.off("data", onStderr);
     };
 
-    const finish = (fn, value) => {
+    const finishResolve = () => {
       if (settled) return;
       settled = true;
       cleanup();
-      fn(value);
+      resolve();
     };
 
-    const onStderr = (chunk) => {
+    const finishReject = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    };
+
+    const onStderr = (chunk: Buffer) => {
       stderr += chunk.toString();
     };
 
-    const onError = (err) => {
-      finish(reject, new RemoteAnnotationError(
+    const onError = (err: Error) => {
+      finishReject(new RemoteAnnotationError(
         "SSH_TUNNEL_FAILED",
         `Failed to start SSH tunnel: ${err instanceof Error ? err.message : String(err)}`,
         { cause: err }
       ));
     };
 
-    const onExit = (code, signal) => {
-      finish(reject, new RemoteAnnotationError(
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      finishReject(new RemoteAnnotationError(
         "SSH_TUNNEL_FAILED",
         `SSH tunnel exited before it became ready (code=${code ?? "null"}, signal=${signal ?? "null"}). ${stderr.trim()}`.trim()
       ));
@@ -240,12 +323,12 @@ function waitForLocalSocket(proc, socketPath, timeoutMs) {
 
     intervalId = setInterval(() => {
       if (fs.existsSync(socketPath)) {
-        finish(resolve);
+        finishResolve();
       }
     }, 50);
 
     timeoutId = setTimeout(() => {
-      finish(reject, new RemoteAnnotationError(
+      finishReject(new RemoteAnnotationError(
         "SSH_TUNNEL_TIMEOUT",
         `Timed out waiting for SSH tunnel socket '${socketPath}'. ${stderr.trim()}`.trim()
       ));
@@ -253,12 +336,15 @@ function waitForLocalSocket(proc, socketPath, timeoutMs) {
   });
 }
 
-export async function createRemoteAnnotationBridge({ browserHost, url }) {
+export async function createRemoteAnnotationBridge({ browserHost, url }: { browserHost: string; url?: string }): Promise<RemoteAnnotationBridge> {
   if (!browserHost) throw new Error("browserHost is required");
+  if (isIpv6LoopbackPageUrl(url)) {
+    throw unsupportedRemoteIpv6LoopbackError();
+  }
 
   const token = await readRemoteToken(browserHost);
   let browserUrl = url;
-  let pageAccess = { url, tunnel: null };
+  let pageAccess: RemotePageAccessPlan = { url, tunnel: null };
 
   if (isLoopbackPageUrl(url)) {
     const browserPort = await pickRemoteBrowserPort(browserHost);
@@ -310,4 +396,8 @@ export async function createRemoteAnnotationBridge({ browserHost, url }) {
       unlinkIfExists(socketPath);
     },
   };
+}
+
+function isNodeError(err: unknown): err is NodeJS.ErrnoException {
+  return !!err && typeof err === "object" && "code" in err;
 }

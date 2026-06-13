@@ -1,11 +1,13 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import * as net from "node:net";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { AnnotationResult, ElementSelection, EditCapture } from "./types.js";
-import { createRemoteAnnotationBridge, parseAnnotateCommandArgs } from "./remote.js";
+import type { HostConnectionOptions } from "./host-connection.ts";
+import { createHostConnectionManager } from "./host-connection.ts";
+import type { ParsedAnnotateCommandArgs, RemoteAnnotationBridge } from "./remote.ts";
+import { createRemoteAnnotationBridge, parseAnnotateCommandArgs } from "./remote.ts";
 
 const SOCKET_PATH = "/tmp/pi-annotate.sock";
 const TOKEN_PATH = "/tmp/pi-annotate.token";
@@ -20,20 +22,10 @@ type AnnotationContext = {
   };
 };
 
-type HostConnectionOptions = {
-  socketPath?: string;
-  token?: string;
-  label?: string;
-};
-
 export default function (pi: ExtensionAPI) {
-  let browserSocket: net.Socket | null = null;
   const pendingRequests = new Map<number, (result: AnnotationResult) => void | Promise<void>>();
-  let dataBuffer = ""; // Buffer for incomplete JSON messages
-  let authToken: string | null = null;
-  let connectedSocketPath: string | null = null;
   let currentCtx: AnnotationContext | null = null;
-  const remoteSessions = new Map<number, { cleanup: () => void; browserHost?: string }>();
+  const remoteSessions = new Map<number, RemoteAnnotationBridge>();
   
   function setStatus(message: string) {
     if (currentCtx?.ui?.setStatus) {
@@ -47,15 +39,15 @@ export default function (pi: ExtensionAPI) {
   
   const annotateHandler = async (args: string, ctx: AnnotationContext) => {
     currentCtx = ctx;
-    const parsed = parseAnnotateCommandArgs(args) as { browserHost?: string; url?: string };
+    const parsed: ParsedAnnotateCommandArgs = parseAnnotateCommandArgs(args);
     let url = parsed.url;
-    let remoteBridge: { socketPath: string; token: string; url?: string; cleanup: () => void; browserHost?: string } | null = null;
+    let remoteBridge: RemoteAnnotationBridge | null = null;
     
     try {
       if (parsed.browserHost) {
         setStatus(`Preparing remote annotation on ${parsed.browserHost}`);
-        remoteBridge = await createRemoteAnnotationBridge({ browserHost: parsed.browserHost, url }) as typeof remoteBridge;
-        url = remoteBridge?.url;
+        remoteBridge = await createRemoteAnnotationBridge({ browserHost: parsed.browserHost, url });
+        url = remoteBridge.url;
       }
 
       await connectToHost(remoteBridge ? {
@@ -97,96 +89,34 @@ export default function (pi: ExtensionAPI) {
   // Socket Connection
   // ─────────────────────────────────────────────────────────────────────
   
+  const hostConnection = createHostConnectionManager({
+    defaultSocketPath: SOCKET_PATH,
+    defaultTokenPath: TOKEN_PATH,
+    maxSocketBuffer: MAX_SOCKET_BUFFER,
+    onStatus: setStatus,
+    onMessage: handleMessage,
+    onConnectionLost() {
+      cleanupAllRemoteSessions();
+      for (const [, resolvePending] of pendingRequests) {
+        resolvePending({
+          success: false,
+          cancelled: true,
+          reason: "connection_lost",
+          elements: [],
+          url: "",
+          viewport: { width: 0, height: 0 },
+        });
+      }
+      pendingRequests.clear();
+    },
+  });
+
   function connectToHost(options: HostConnectionOptions = {}): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const socketPath = options.socketPath || SOCKET_PATH;
-      const label = options.label || "native host";
-
-      if (browserSocket && !browserSocket.destroyed) {
-        if (connectedSocketPath === socketPath) {
-          resolve();
-          return;
-        }
-        browserSocket.destroy();
-        browserSocket = null;
-        connectedSocketPath = null;
-        dataBuffer = "";
-      }
-
-      try {
-        authToken = options.token || fs.readFileSync(TOKEN_PATH, "utf8").trim();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        reject(new Error(`Failed to read auth token at ${TOKEN_PATH}: ${message}`, { cause: err }));
-        return;
-      }
-
-      browserSocket = net.createConnection(socketPath);
-      
-      browserSocket.on("connect", () => {
-        connectedSocketPath = socketPath;
-        setStatus(`Connected to ${label}`);
-        sendToHost({ type: "AUTH", token: authToken });
-        resolve();
-      });
-      
-      browserSocket.on("data", (data) => {
-        // Buffer incoming data and split by newlines
-        dataBuffer += data.toString();
-        if (dataBuffer.length > MAX_SOCKET_BUFFER) {
-          setStatus("Error: Socket buffer overflow");
-          browserSocket?.destroy();
-          dataBuffer = "";
-          return;
-        }
-        const lines = dataBuffer.split("\n");
-        
-        // Keep the last incomplete line in the buffer
-        dataBuffer = lines.pop() || "";
-        
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const msg = JSON.parse(line);
-            void handleMessage(msg);
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            setStatus(`Error: Failed to parse message: ${message}`);
-          }
-        }
-      });
-      
-      browserSocket.on("error", (err) => {
-        setStatus(`Error: ${err.message}`);
-        reject(err);
-      });
-      
-      browserSocket.on("close", () => {
-        setStatus("Disconnected from native host");
-        browserSocket = null;
-        authToken = null;
-        connectedSocketPath = null;
-        dataBuffer = "";
-        cleanupAllRemoteSessions();
-        for (const [, resolvePending] of pendingRequests) {
-          resolvePending({
-            success: false,
-            cancelled: true,
-            reason: "connection_lost",
-            elements: [],
-            url: "",
-            viewport: { width: 0, height: 0 },
-          });
-        }
-        pendingRequests.clear();
-      });
-    });
+    return hostConnection.connect(options);
   }
   
   function sendToHost(msg: object) {
-    if (browserSocket && !browserSocket.destroyed) {
-      browserSocket.write(JSON.stringify(msg) + "\n");
-    }
+    hostConnection.send(msg);
   }
 
   function cleanupRemoteSession(requestId: number | null) {
@@ -239,11 +169,6 @@ export default function (pi: ExtensionAPI) {
       }
       pendingRequests.clear();
       cleanupAllRemoteSessions();
-      
-      // Connection will be destroyed by native host, so clean up
-      browserSocket = null;
-      connectedSocketPath = null;
-      dataBuffer = "";
       return;
     }
 
@@ -572,13 +497,13 @@ export default function (pi: ExtensionAPI) {
       const { browserHost, timeout = 300 } = params as { url?: string; browserHost?: string; timeout?: number };
       let { url } = params as { url?: string };
       const requestId = Date.now();
-      let remoteBridge: { socketPath: string; token: string; url?: string; cleanup: () => void; browserHost?: string } | null = null;
+      let remoteBridge: RemoteAnnotationBridge | null = null;
 
       // Try to connect first
       try {
         if (browserHost) {
-          remoteBridge = await createRemoteAnnotationBridge({ browserHost, url }) as typeof remoteBridge;
-          url = remoteBridge?.url;
+          remoteBridge = await createRemoteAnnotationBridge({ browserHost, url });
+          url = remoteBridge.url;
         }
 
         await connectToHost(remoteBridge ? {

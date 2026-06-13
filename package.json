@@ -30,7 +30,8 @@
   ],
   "files": [
     "index.ts",
-    "remote.js",
+    "host-connection.ts",
+    "remote.ts",
     "types.ts",
     "banner.png",
     "demo.mp4",
@@ -44,5 +45,8 @@
       "./index.ts"
     ],
     "video": "https://github.com/nicobailon/pi-annotate/raw/refs/heads/main/demo.mp4"
+  },
+  "devDependencies": {
+    "fast-check": "^4.8.0"
   }
 }

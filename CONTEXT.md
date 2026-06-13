@@ -17,7 +17,7 @@ An annotation flow where the browser and the active Pi agent session are on the 
 _Avoid_: Local annotation, default annotation
 
 **Remote Annotation**:
-An annotation flow where the Browser Host and Pi Session Host are different machines owned by the same user. The Browser Host is only the place where the user operates the browser; it is not where Browser Host-local pages are targeted from a remote Pi session.
+An annotation flow where the Browser Host and Pi Session Host are different machines owned by the same user. With no URL, Remote Annotation uses the Browser Host's current tab. With a URL, the URL is interpreted from the Pi Session Host perspective; Browser Host-local page URLs are not a remote-path design target.
 _Avoid_: Collaboration, cloud relay, screen sharing
 
 **Browser Host Alias**:
@@ -37,9 +37,9 @@ A temporary private path that carries annotation requests and results between a 
 _Avoid_: Relay, sync channel, collaboration channel
 
 **Page Access Tunnel**:
-A temporary private path that lets the Browser Host load a page served only from the Pi Session Host. Remote Annotation creates this only for Loopback Page URLs; all other page URLs are passed to the Browser Host unchanged.
+A temporary private path that lets the Browser Host load a page served only from the Pi Session Host. Remote Annotation creates this only for supported Loopback Page URLs; all other page URLs are passed to the Browser Host unchanged.
 _Avoid_: Public URL, deployment, sharing link
 
 **Loopback Page URL**:
-A URL whose host names only the current machine, such as `localhost`, `127.0.0.1`, or `[::1]`. In Remote Annotation, this always refers to the Pi Session Host; Browser Host-local pages are not a design target.
+A URL whose host names only the current machine, such as `localhost`, `127.0.0.1`, or `[::1]`. In Remote Annotation, this always refers to the Pi Session Host; Browser Host-local pages are reached by omitting the URL and annotating the Browser Host's current tab. Remote page-access tunnels currently support `localhost` and IPv4 loopback; IPv6 loopback URLs such as `[::1]` are rejected to avoid ambiguous SSH tunnel bind/target behavior.
 _Avoid_: Browser-local URL, local URL

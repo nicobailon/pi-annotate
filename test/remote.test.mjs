@@ -1,13 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fc from "fast-check";
 
 import {
+  RemoteAnnotationError,
   buildRemoteNodeEvalCommand,
   classifySshFailure,
   isLoopbackPageUrl,
   parseAnnotateCommandArgs,
   planRemotePageAccess,
-} from "../remote.js";
+} from "../remote.ts";
 
 test("parseAnnotateCommandArgs preserves same-host annotate forms", () => {
   assert.deepEqual(parseAnnotateCommandArgs(""), { browserHost: undefined, url: undefined });
@@ -32,6 +34,49 @@ test("parseAnnotateCommandArgs treats first non-url token as Browser Host Alias"
   });
 });
 
+test("parseAnnotateCommandArgs should never throw for arbitrary command text", () => {
+  fc.assert(
+    fc.property(fc.string(), (args) => {
+      // Act
+      const parsed = parseAnnotateCommandArgs(args);
+
+      // Assert
+      assert.equal(typeof parsed, "object");
+      assert.ok(parsed.browserHost === undefined || typeof parsed.browserHost === "string");
+      assert.ok(parsed.url === undefined || typeof parsed.url === "string");
+    })
+  );
+});
+
+test("parseAnnotateCommandArgs should preserve URL-like first tokens as same-host URLs", () => {
+  fc.assert(
+    fc.property(urlLikeCommand(), (args) => {
+      // Act
+      const parsed = parseAnnotateCommandArgs(args);
+
+      // Assert
+      assert.equal(parsed.browserHost, undefined);
+      assert.equal(parsed.url, args.trim());
+    })
+  );
+});
+
+test("parseAnnotateCommandArgs should use only the first non-url token as Browser Host Alias", () => {
+  fc.assert(
+    fc.property(nonUrlToken(), fc.array(nonEmptyToken(), { maxLength: 6 }), (host, rest) => {
+      // Arrange
+      const args = [host, ...rest].join(" ");
+
+      // Act
+      const parsed = parseAnnotateCommandArgs(args);
+
+      // Assert
+      assert.equal(parsed.browserHost, host);
+      assert.equal(parsed.url, rest.length > 0 ? rest.join(" ") : undefined);
+    })
+  );
+});
+
 test("isLoopbackPageUrl detects only loopback page URLs", () => {
   assert.equal(isLoopbackPageUrl("http://localhost:3000"), true);
   assert.equal(isLoopbackPageUrl("https://127.0.0.1:5173"), true);
@@ -41,7 +86,7 @@ test("isLoopbackPageUrl detects only loopback page URLs", () => {
   assert.equal(isLoopbackPageUrl(undefined), false);
 });
 
-test("planRemotePageAccess tunnels loopback URLs and rewrites only the browser-facing port", () => {
+test("planRemotePageAccess tunnels IPv4 loopback URLs and rewrites only the browser-facing port", () => {
   assert.deepEqual(planRemotePageAccess("http://localhost:3000/path?q=1#hash", 49152), {
     url: "http://localhost:49152/path?q=1#hash",
     tunnel: {
@@ -59,6 +104,38 @@ test("planRemotePageAccess tunnels loopback URLs and rewrites only the browser-f
       browserPort: 49153,
     },
   });
+});
+
+test("planRemotePageAccess should preserve IPv4 loopback URL path, query, and hash", () => {
+  fc.assert(
+    fc.property(ipv4LoopbackUrl(), fc.integer({ min: 1, max: 65535 }), ({ rawUrl, targetPort }, browserPort) => {
+      // Arrange
+      const originalUrl = new URL(rawUrl);
+
+      // Act
+      const plan = planRemotePageAccess(rawUrl, browserPort);
+      const browserUrl = new URL(plan.url);
+
+      // Assert
+      assert.equal(browserUrl.protocol, originalUrl.protocol);
+      assert.equal(browserUrl.pathname, originalUrl.pathname);
+      assert.equal(browserUrl.search, originalUrl.search);
+      assert.equal(browserUrl.hash, originalUrl.hash);
+      assert.equal(Number(browserUrl.port || (originalUrl.protocol === "https:" ? 443 : 80)), browserPort);
+      assert.deepEqual(plan.tunnel, {
+        targetHost: "127.0.0.1",
+        targetPort,
+        browserPort,
+      });
+    })
+  );
+});
+
+test("planRemotePageAccess rejects IPv6 loopback URLs in remote annotation", () => {
+  assert.throws(
+    () => planRemotePageAccess("http://[::1]:3000", 49152),
+    (err) => err instanceof RemoteAnnotationError && err.code === "REMOTE_IPV6_LOOPBACK_UNSUPPORTED"
+  );
 });
 
 test("planRemotePageAccess passes non-loopback URLs through unchanged", () => {
@@ -89,3 +166,41 @@ test("buildRemoteNodeEvalCommand shell-quotes node scripts for ssh remote execut
     String.raw`node -e 'const net=require('\''node:net'\'');s.listen(0,'\''127.0.0.1'\'',()=>{});'`
   );
 });
+
+// Helpers
+
+function urlLikeCommand() {
+  return fc.record({
+    scheme: fc.constantFrom("http", "https", "foo+bar", "x.y"),
+    host: nonEmptyToken(),
+    path: fc.array(nonEmptyToken(), { maxLength: 4 }),
+  }).map(({ scheme, host, path }) => `${scheme}://${host}${path.length ? "/" + path.join("/") : ""}`);
+}
+
+function nonUrlToken() {
+  return nonEmptyToken().filter((value) => !/^[a-z][a-z0-9+.-]*:\/\//i.test(value));
+}
+
+function nonEmptyToken() {
+  return fc.string({ minLength: 1 }).filter((value) => value.trim() === value && !/\s/.test(value));
+}
+
+function ipv4LoopbackUrl() {
+  return fc.record({
+    protocol: fc.constantFrom("http:", "https:"),
+    host: fc.constantFrom("localhost", "127.0.0.1", "127.1.2.3"),
+    targetPort: fc.integer({ min: 1, max: 65535 }),
+    pathSegments: fc.array(fc.webSegment(), { maxLength: 4 }),
+    query: fc.option(fc.webQueryParameters(), { nil: "" }),
+    fragment: fc.option(fc.webFragments(), { nil: "" }),
+  }).map(({ protocol, host, targetPort, pathSegments, query, fragment }) => {
+    const pathname = `/${pathSegments.join("/")}`;
+    const search = query ? `?${query}` : "";
+    const hash = fragment ? `#${fragment}` : "";
+    return {
+      rawUrl: `${protocol}//${host}:${targetPort}${pathname}${search}${hash}`,
+      targetPort,
+      protocol,
+    };
+  });
+}
