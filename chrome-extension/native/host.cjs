@@ -213,7 +213,9 @@ const server = net.createServer((socket) => {
       try {
         const msg = JSON.parse(line);
         if (!authed) {
-          if (msg?.type === "AUTH" && tokenMatches(msg.token)) {
+          if (msg?.type === "PING") {
+            socket.write(JSON.stringify({ type: "PONG", timestamp: Date.now() }) + "\n");
+          } else if (msg?.type === "AUTH" && tokenMatches(msg.token)) {
             promoteAuthenticatedSocket();
           } else {
             log("Pi client authentication failed");

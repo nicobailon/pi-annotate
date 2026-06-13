@@ -278,7 +278,7 @@ function randomEphemeralPort(): number {
   return randomInt(EPHEMERAL_PORT_MIN, EPHEMERAL_PORT_MAX_EXCLUSIVE);
 }
 
-function waitForLocalTcpEndpoint(proc: ChildProcess, endpoint: Extract<HostEndpoint, { type: "tcp" }>, timeoutMs: number): Promise<void> {
+export function waitForPiAnnotateEndpoint(proc: ChildProcess, endpoint: Extract<HostEndpoint, { type: "tcp" }>, timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
     let stderr = "";
@@ -330,17 +330,53 @@ function waitForLocalTcpEndpoint(proc: ChildProcess, endpoint: Extract<HostEndpo
     };
 
     const probe = () => {
+      if (settled) return;
       const socket = net.createConnection({ host: endpoint.host, port: endpoint.port });
       probes.add(socket);
+      let probeSettled = false;
+      let probeBuffer = "";
+      let probeTimeoutId: NodeJS.Timeout | undefined;
+
+      const cleanupProbe = () => {
+        if (probeSettled) return;
+        probeSettled = true;
+        if (probeTimeoutId) clearTimeout(probeTimeoutId);
+        probes.delete(socket);
+        socket.destroy();
+      };
+
       socket.once("connect", () => {
-        probes.delete(socket);
-        socket.destroy();
-        finishResolve();
+        socket.write(JSON.stringify({ type: "PING" }) + "\n");
       });
-      socket.once("error", () => {
-        probes.delete(socket);
-        socket.destroy();
+
+      socket.on("data", (data) => {
+        probeBuffer += data.toString();
+        if (probeBuffer.length > 64 * 1024) {
+          cleanupProbe();
+          return;
+        }
+
+        const lines = probeBuffer.split("\n");
+        probeBuffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const msg = JSON.parse(line);
+            if (msg?.type === "PONG") {
+              cleanupProbe();
+              finishResolve();
+              return;
+            }
+          } catch {
+            cleanupProbe();
+            return;
+          }
+        }
       });
+
+      socket.once("error", cleanupProbe);
+      socket.once("close", cleanupProbe);
+      probeTimeoutId = setTimeout(cleanupProbe, 500);
     };
 
     proc.stderr?.on("data", onStderr);
@@ -353,7 +389,7 @@ function waitForLocalTcpEndpoint(proc: ChildProcess, endpoint: Extract<HostEndpo
     timeoutId = setTimeout(() => {
       finishReject(new RemoteAnnotationError(
         "SSH_TUNNEL_TIMEOUT",
-        `Timed out waiting for SSH tunnel TCP endpoint '${endpoint.host}:${endpoint.port}'. ${stderr.trim()}`.trim()
+        `Timed out waiting for Pi Annotate endpoint '${endpoint.host}:${endpoint.port}'. ${stderr.trim()}`.trim()
       ));
     }, timeoutMs);
   });
@@ -385,7 +421,7 @@ export async function createRemoteAnnotationBridge({ browserHost, url }: { brows
     });
 
     try {
-      await waitForLocalTcpEndpoint(proc, endpoint, SSH_TUNNEL_TIMEOUT_MS);
+      await waitForPiAnnotateEndpoint(proc, endpoint, SSH_TUNNEL_TIMEOUT_MS);
       let cleaned = false;
       return {
         browserHost,

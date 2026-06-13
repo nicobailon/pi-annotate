@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import * as net from "node:net";
 import fc from "fast-check";
 
 import {
@@ -10,6 +12,7 @@ import {
   parseAnnotateCommandArgs,
   planRemotePageAccess,
   validateBrowserHostAlias,
+  waitForPiAnnotateEndpoint,
 } from "../remote.ts";
 
 test("parseAnnotateCommandArgs preserves same-host annotate forms", () => {
@@ -214,7 +217,75 @@ test("buildSshTunnelArgs adds explicit loopback reverse forwards without remote 
   assert.equal(args.some((arg) => /node|-e|StreamLocalBindUnlink/.test(arg)), false);
 });
 
+test("waitForPiAnnotateEndpoint rejects unrelated TCP listeners", async () => {
+  const sockets = new Set();
+  const server = net.createServer((socket) => {
+    trackSocket(sockets, socket);
+    socket.write(JSON.stringify({ type: "NOT_PI_ANNOTATE" }) + "\n");
+  });
+  await listen(server);
+  const { port } = server.address();
+
+  try {
+    await assert.rejects(
+      waitForPiAnnotateEndpoint(new FakeProcess(), { type: "tcp", host: "127.0.0.1", port }, 150),
+      (err) => err instanceof RemoteAnnotationError && err.code === "SSH_TUNNEL_TIMEOUT"
+    );
+  } finally {
+    destroySockets(sockets);
+    await closeServer(server);
+  }
+});
+
+test("waitForPiAnnotateEndpoint resolves only after Pi Annotate PONG", async () => {
+  const sockets = new Set();
+  const server = net.createServer((socket) => {
+    trackSocket(sockets, socket);
+    socket.on("data", (data) => {
+      if (data.toString().includes('"type":"PING"')) {
+        socket.write(JSON.stringify({ type: "PONG" }) + "\n");
+      }
+    });
+  });
+  await listen(server);
+  const { port } = server.address();
+
+  try {
+    await waitForPiAnnotateEndpoint(new FakeProcess(), { type: "tcp", host: "127.0.0.1", port }, 500);
+  } finally {
+    destroySockets(sockets);
+    await closeServer(server);
+  }
+});
+
 // Helpers
+
+class FakeProcess extends EventEmitter {
+  stderr = new EventEmitter();
+}
+
+function listen(server) {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+}
+
+function closeServer(server) {
+  return new Promise((resolve) => server.close(resolve));
+}
+
+function trackSocket(sockets, socket) {
+  sockets.add(socket);
+  socket.once("close", () => sockets.delete(socket));
+}
+
+function destroySockets(sockets) {
+  for (const socket of sockets) socket.destroy();
+}
 
 function urlLikeCommand() {
   return fc.record({
