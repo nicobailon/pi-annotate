@@ -48,9 +48,21 @@ This installs the native messaging manifest for Google Chrome, Google Chrome for
 ## Usage
 
 ```bash
-/annotate                  # Current browser tab
-/annotate https://x.com    # Opens URL first
+/annotate                              # Current same-machine browser tab
+/annotate https://x.com                # Opens URL in the same-machine browser
+/annotate laptop                       # Uses the browser on SSH host alias "laptop"
+/annotate laptop http://localhost:3000 # Uses laptop browser for a page served on this Pi host
 ```
+
+Remote annotation uses your SSH config. The first non-URL argument is treated as a Browser Host Alias, so `laptop` must work non-interactively from the Pi Session Host:
+
+```bash
+ssh -o BatchMode=yes laptop true
+```
+
+The Browser Host must also have Chrome/Chromium, the Pi Annotate browser extension, and the native host installed. If SSH works but the Browser Host is not ready, open Chrome there, click the Pi Annotate extension icon, then retry.
+
+In remote annotation, loopback URLs (`localhost`, `127.0.0.1`, `[::1]`) refer to the Pi Session Host where `/annotate` is run. Pi Annotate creates a temporary SSH page-access tunnel so the Browser Host can load that page. Non-loopback URLs are passed to the Browser Host unchanged.
 
 | Action | How |
 |--------|-----|
@@ -144,9 +156,12 @@ Native Host (host.cjs)
 Browser Extension (background.js → content.js)
 ```
 
+Remote annotation keeps the browser-side bridge unchanged. The Pi extension creates temporary SSH tunnels to the Browser Host's existing native host socket, and creates an additional page-access tunnel only when the requested page URL is loopback.
+
 | File | Purpose |
 |------|---------|
 | `index.ts` | Pi extension — `/annotate` command + tool |
+| `remote.js` | Remote annotation argument parsing and SSH tunnel orchestration |
 | `types.ts` | TypeScript interfaces |
 | `chrome-extension/content.js` | Element picker UI (vanilla JS) |
 | `chrome-extension/background.js` | Native messaging, screenshots, tab routing |

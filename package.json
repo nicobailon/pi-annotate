@@ -13,6 +13,9 @@
     "url": "https://github.com/nicobailon/pi-annotate/issues"
   },
   "homepage": "https://github.com/nicobailon/pi-annotate#readme",
+  "scripts": {
+    "test": "node --test"
+  },
   "dependencies": {
     "typebox": "^1.1.24"
   },
@@ -27,6 +30,7 @@
   ],
   "files": [
     "index.ts",
+    "remote.js",
     "types.ts",
     "banner.png",
     "demo.mp4",
