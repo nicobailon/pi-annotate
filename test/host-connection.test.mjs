@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 
 import { createHostConnectionManager } from "../host-connection.ts";
 
-test("createHostConnectionManager keeps the active Browser Host connection when an old socket closes", async () => {
+test("createHostConnectionManager cleans up a replaced Browser Host connection without losing the new one", async () => {
   // Arrange
   const firstSocket = new FakeSocket();
   const secondSocket = new FakeSocket();
@@ -34,7 +34,7 @@ test("createHostConnectionManager keeps the active Browser Host connection when 
   manager.send({ type: "PING" });
 
   // Assert
-  assert.equal(disconnects.length, 0);
+  assert.deepEqual(disconnects, ["lost"]);
   assert.equal(firstSocket.destroyed, true);
   assert.deepEqual(firstSocket.writes, [{ type: "AUTH", token: "token-a" }]);
   assert.deepEqual(secondSocket.writes, [
@@ -47,7 +47,7 @@ test("createHostConnectionManager keeps the active Browser Host connection when 
   secondSocket.emit("close");
 
   // Assert
-  assert.deepEqual(disconnects, ["lost"]);
+  assert.deepEqual(disconnects, ["lost", "lost"]);
 });
 
 test("createHostConnectionManager ignores stale data from a previous socket after switching", async () => {

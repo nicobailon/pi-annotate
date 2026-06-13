@@ -42,10 +42,13 @@ export function createHostConnectionManager(options: HostConnectionManagerOption
           resolve();
           return;
         }
-        browserSocket.destroy();
+        const previousSocket = browserSocket;
         browserSocket = null;
+        authToken = null;
         connectedSocketPath = null;
         dataBuffer = "";
+        void options.onConnectionLost();
+        previousSocket.destroy();
       }
 
       try {
