@@ -160,7 +160,8 @@ Remote annotation keeps the browser-side bridge unchanged. The Pi extension crea
 
 | File | Purpose |
 |------|---------|
-| `index.ts` | Pi extension — `/annotate` command + tool |
+| `index.ts` | Pi extension adapter — `/annotate` command + tool registration |
+| `annotation-run.ts` | Annotation run orchestration and request/session cleanup |
 | `host-connection.ts` | Socket connection lifecycle and stale-socket protection |
 | `remote.ts` | Remote annotation argument parsing and SSH tunnel orchestration |
 | `types.ts` | TypeScript interfaces |

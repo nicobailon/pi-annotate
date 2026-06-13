@@ -30,6 +30,7 @@
   ],
   "files": [
     "index.ts",
+    "annotation-run.ts",
     "host-connection.ts",
     "remote.ts",
     "types.ts",

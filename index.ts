@@ -6,84 +6,22 @@ import * as os from "node:os";
 import type { AnnotationResult, ElementSelection, EditCapture } from "./types.js";
 import type { HostConnectionOptions } from "./host-connection.ts";
 import { createHostConnectionManager } from "./host-connection.ts";
-import type { ParsedAnnotateCommandArgs, RemoteAnnotationBridge } from "./remote.ts";
-import { createRemoteAnnotationBridge, parseAnnotateCommandArgs } from "./remote.ts";
+import type { AnnotationContext } from "./annotation-run.ts";
+import { createAnnotationRunManager } from "./annotation-run.ts";
 
 const SOCKET_PATH = "/tmp/pi-annotate.sock";
 const TOKEN_PATH = "/tmp/pi-annotate.token";
 const MAX_SOCKET_BUFFER = 32 * 1024 * 1024; // 32MB (increased from 8MB for edit capture payloads)
 const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024; // 15MB
 
-type AnnotationContext = {
-  hasUI?: boolean;
-  ui?: {
-    notify?: (message: string, level: "info" | "error") => void;
-    setStatus?: (source: string, message: string) => void;
-  };
-};
-
 export default function (pi: ExtensionAPI) {
-  const pendingRequests = new Map<number, (result: AnnotationResult) => void | Promise<void>>();
   let currentCtx: AnnotationContext | null = null;
-  const remoteSessions = new Map<number, RemoteAnnotationBridge>();
   
   function setStatus(message: string) {
     if (currentCtx?.ui?.setStatus) {
       currentCtx.ui.setStatus("pi-annotate", message);
     }
   }
-  
-  // ─────────────────────────────────────────────────────────────────────
-  // /annotate Command
-  // ─────────────────────────────────────────────────────────────────────
-  
-  const annotateHandler = async (args: string, ctx: AnnotationContext) => {
-    currentCtx = ctx;
-    const parsed: ParsedAnnotateCommandArgs = parseAnnotateCommandArgs(args);
-    let url = parsed.url;
-    let remoteBridge: RemoteAnnotationBridge | null = null;
-    
-    try {
-      if (parsed.browserHost) {
-        setStatus(`Preparing remote annotation on ${parsed.browserHost}`);
-        remoteBridge = await createRemoteAnnotationBridge({ browserHost: parsed.browserHost, url });
-        url = remoteBridge.url;
-      }
-
-      await connectToHost(remoteBridge ? {
-        endpoint: remoteBridge.endpoint,
-        token: remoteBridge.token,
-        label: `Browser Host ${parsed.browserHost}`,
-      } : undefined);
-    } catch (err) {
-      remoteBridge?.cleanup();
-      const message = err instanceof Error ? err.message : String(err);
-      const fallback = parsed.browserHost
-        ? `Remote annotation failed for '${parsed.browserHost}'. ${message}`
-        : `Browser extension not connected. ${message}. Click the Pi Annotate icon in the browser to wake the service worker, then retry.`;
-      ctx.ui?.notify(fallback, "error");
-      return;
-    }
-    
-    const requestId = Date.now();
-    if (remoteBridge) remoteSessions.set(requestId, remoteBridge);
-    sendToHost({
-      type: "START_ANNOTATION",
-      requestId,
-      url,
-    });
-    
-    if (parsed.browserHost) {
-      ctx.ui?.notify(url ? `Opening annotation mode on ${parsed.browserHost}: ${url}` : `Annotation mode started on ${parsed.browserHost}'s current browser tab`, "info");
-    } else {
-      ctx.ui?.notify(url ? `Opening annotation mode on ${url}` : "Annotation mode started on current browser tab", "info");
-    }
-  };
-
-  pi.registerCommand("annotate", {
-    description: "Start visual annotation mode in the browser. Optionally provide a URL.",
-    handler: annotateHandler,
-  });
   
   // ─────────────────────────────────────────────────────────────────────
   // Socket Connection
@@ -94,21 +32,8 @@ export default function (pi: ExtensionAPI) {
     defaultTokenPath: TOKEN_PATH,
     maxSocketBuffer: MAX_SOCKET_BUFFER,
     onStatus: setStatus,
-    onMessage: handleMessage,
-    onConnectionLost() {
-      cleanupAllRemoteSessions();
-      for (const [, resolvePending] of pendingRequests) {
-        resolvePending({
-          success: false,
-          cancelled: true,
-          reason: "connection_lost",
-          elements: [],
-          url: "",
-          viewport: { width: 0, height: 0 },
-        });
-      }
-      pendingRequests.clear();
-    },
+    onMessage: (message) => annotationRuns.handleHostMessage(message),
+    onConnectionLost: () => annotationRuns.handleConnectionLost(),
   });
 
   function connectToHost(options: HostConnectionOptions = {}): Promise<void> {
@@ -123,94 +48,28 @@ export default function (pi: ExtensionAPI) {
     return hostConnection.sendAndFlush(msg);
   }
 
-  function cleanupRemoteSession(requestId: number | null) {
-    if (!requestId) return;
-    const session = remoteSessions.get(requestId);
-    if (!session) return;
-    remoteSessions.delete(requestId);
-    session.cleanup();
-  }
+  const annotationRuns = createAnnotationRunManager({
+    connectToHost,
+    sendToHost,
+    sendToHostAndFlush,
+    formatResult,
+    sendUserMessage: (message) => pi.sendUserMessage(message),
+    setStatus,
+  });
 
-  function cleanupAllRemoteSessions() {
-    for (const [, session] of remoteSessions) {
-      session.cleanup();
-    }
-    remoteSessions.clear();
-  }
+  // ─────────────────────────────────────────────────────────────────────
+  // /annotate Command
+  // ─────────────────────────────────────────────────────────────────────
   
-  function isRecord(value: unknown): value is Record<string, unknown> {
-    return !!value && typeof value === "object" && !Array.isArray(value);
-  }
+  const annotateHandler = async (args: string, ctx: AnnotationContext) => {
+    currentCtx = ctx;
+    await annotationRuns.startCommand(args, ctx);
+  };
 
-  function isAnnotationResult(value: unknown): value is AnnotationResult {
-    if (!isRecord(value)) return false;
-    if (typeof value.success !== "boolean") return false;
-    return true;
-  }
-
-  async function handleMessage(msg: unknown) {
-    if (!isRecord(msg) || typeof msg.type !== "string") return;
-    
-    setStatus(`Received: ${msg.type}`);
-
-    const requestId = typeof msg.requestId === "number" ? msg.requestId : null;
-
-    if (msg.type === "SESSION_REPLACED") {
-      // Another terminal took over the annotation session
-      setStatus("Session replaced by another terminal");
-      const reason = typeof msg.reason === "string" ? msg.reason : "Session replaced by another terminal";
-      
-      // Resolve all pending requests with cancelled status
-      for (const [, resolvePending] of pendingRequests) {
-        await resolvePending({
-          success: false,
-          cancelled: true,
-          reason,
-          elements: [],
-          url: "",
-          viewport: { width: 0, height: 0 },
-        });
-      }
-      pendingRequests.clear();
-      cleanupAllRemoteSessions();
-      return;
-    }
-
-    if (msg.type === "ANNOTATIONS_COMPLETE") {
-      if (!isAnnotationResult(msg.result)) return;
-      if (requestId && pendingRequests.has(requestId)) {
-        // Tool flow - resolve the promise
-        const resolvePending = pendingRequests.get(requestId);
-        if (!resolvePending) return;
-        pendingRequests.delete(requestId);
-        cleanupRemoteSession(requestId);
-        await resolvePending(msg.result);
-      } else {
-        // Command flow - inject as user message
-        cleanupRemoteSession(requestId);
-        const result = msg.result;
-        const text = await formatResult(result);
-        setStatus("Annotation complete");
-        pi.sendUserMessage(text);
-      }
-    } else if (msg.type === "CANCEL") {
-      cleanupRemoteSession(requestId);
-      if (requestId && pendingRequests.has(requestId)) {
-        const resolvePending = pendingRequests.get(requestId);
-        if (!resolvePending) return;
-        pendingRequests.delete(requestId);
-        await resolvePending({
-          success: false,
-          cancelled: true,
-          reason: typeof msg.reason === "string" ? msg.reason : "user",
-          elements: [],
-          url: "",
-          viewport: { width: 0, height: 0 },
-        });
-      }
-      // For command flow, cancel is just ignored (UI already closed)
-    }
-  }
+  pi.registerCommand("annotate", {
+    description: "Start visual annotation mode in the browser. Optionally provide a URL.",
+    handler: annotateHandler,
+  });
   
   // ─────────────────────────────────────────────────────────────────────
   // Format Result
@@ -498,91 +357,7 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       currentCtx = ctx;
-      const { browserHost, timeout = 300 } = params as { url?: string; browserHost?: string; timeout?: number };
-      let { url } = params as { url?: string };
-      const requestId = Date.now();
-      let remoteBridge: RemoteAnnotationBridge | null = null;
-
-      // Try to connect first
-      try {
-        if (browserHost) {
-          remoteBridge = await createRemoteAnnotationBridge({ browserHost, url });
-          url = remoteBridge.url;
-        }
-
-        await connectToHost(remoteBridge ? {
-          endpoint: remoteBridge.endpoint,
-          token: remoteBridge.token,
-          label: `Browser Host ${browserHost}`,
-        } : undefined);
-      } catch (err) {
-        remoteBridge?.cleanup();
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text", text: browserHost ? `Remote annotation failed for '${browserHost}'. ${message}` : "Browser extension not connected. Click the Pi Annotate icon in the browser to wake the service worker, then retry." }],
-          details: { error: message },
-        };
-      }
-
-      if (remoteBridge) remoteSessions.set(requestId, remoteBridge);
-
-      return new Promise((resolve) => {
-        let timeoutId: NodeJS.Timeout | null = null;
-        
-        const cleanup = () => {
-          if (timeoutId) clearTimeout(timeoutId);
-          pendingRequests.delete(requestId);
-          cleanupRemoteSession(requestId);
-          signal?.removeEventListener("abort", onAbort);
-        };
-
-        const onAbort = () => {
-          void sendToHostAndFlush({ type: "CANCEL", requestId, reason: "aborted" }).finally(cleanup);
-          resolve({
-            content: [{ type: "text", text: "Annotation was aborted." }],
-            details: { aborted: true },
-          });
-        };
-        
-        // Handle abort signal
-        if (signal?.aborted) {
-          cleanup();
-          return resolve({
-            content: [{ type: "text", text: "Annotation was aborted." }],
-            details: { aborted: true },
-          });
-        }
-        signal?.addEventListener("abort", onAbort);
-        
-        // Set up response handler
-        pendingRequests.set(requestId, async (result) => {
-          cleanup();
-          resolve({
-            content: [{ type: "text", text: await formatResult(result) }],
-            details: result,
-          });
-        });
-        
-        // Set timeout
-        timeoutId = setTimeout(() => {
-          void sendToHostAndFlush({ type: "CANCEL", requestId, reason: "timeout" }).finally(cleanup);
-          resolve({
-            content: [{ type: "text", text: `Annotation timed out after ${timeout}s` }],
-            details: { timeout: true },
-          });
-        }, timeout * 1000);
-        
-        // Send start message
-        sendToHost({
-          type: "START_ANNOTATION",
-          requestId,
-          url,
-        });
-        
-        if (ctx.hasUI) {
-          ctx.ui.notify(browserHost ? `Annotation mode started in ${browserHost}'s browser` : "Annotation mode started in the browser", "info");
-        }
-      });
+      return annotationRuns.startTool(params as { url?: string; browserHost?: string; timeout?: number }, signal, ctx);
     },
   });
 }
