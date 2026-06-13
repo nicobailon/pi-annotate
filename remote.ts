@@ -14,6 +14,7 @@ export type RemoteAnnotationErrorCode =
   | "SSH_HOST_KEY_FAILED"
   | "SSH_AUTH_FAILED"
   | "SSH_HOST_UNRESOLVED"
+  | "SSH_INVALID_HOST_ALIAS"
   | "SSH_CONNECT_FAILED"
   | "BROWSER_HOST_NOT_READY"
   | "REMOTE_IPV6_LOOPBACK_UNSUPPORTED"
@@ -84,6 +85,17 @@ export function isUrlLike(value: unknown): value is string {
   return typeof value === "string" && /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
 }
 
+export function validateBrowserHostAlias(browserHost: unknown): string {
+  const alias = typeof browserHost === "string" ? browserHost.trim() : "";
+  if (!alias || alias.startsWith("-") || /\s|[\x00-\x1f\x7f]/.test(alias)) {
+    throw new RemoteAnnotationError(
+      "SSH_INVALID_HOST_ALIAS",
+      "Browser Host alias must be a non-empty SSH host alias and cannot start with '-' or contain whitespace/control characters."
+    );
+  }
+  return alias;
+}
+
 export function isLoopbackPageUrl(rawUrl: unknown): rawUrl is string {
   if (!rawUrl || typeof rawUrl !== "string") return false;
   let parsed: URL;
@@ -125,6 +137,7 @@ export function planRemotePageAccess(rawUrl: string | undefined, browserPort: nu
 
   const parsed = new URL(rawUrl);
   const targetPort = Number.parseInt(parsed.port || defaultPortForProtocol(parsed.protocol), 10);
+  parsed.hostname = "127.0.0.1";
   parsed.port = String(browserPort);
 
   return {
@@ -337,7 +350,7 @@ function waitForLocalSocket(proc: ChildProcess, socketPath: string, timeoutMs: n
 }
 
 export async function createRemoteAnnotationBridge({ browserHost, url }: { browserHost: string; url?: string }): Promise<RemoteAnnotationBridge> {
-  if (!browserHost) throw new Error("browserHost is required");
+  browserHost = validateBrowserHostAlias(browserHost);
   if (isIpv6LoopbackPageUrl(url)) {
     throw unsupportedRemoteIpv6LoopbackError();
   }

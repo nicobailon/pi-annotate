@@ -9,6 +9,7 @@ import {
   isLoopbackPageUrl,
   parseAnnotateCommandArgs,
   planRemotePageAccess,
+  validateBrowserHostAlias,
 } from "../remote.ts";
 
 test("parseAnnotateCommandArgs preserves same-host annotate forms", () => {
@@ -77,6 +78,18 @@ test("parseAnnotateCommandArgs should use only the first non-url token as Browse
   );
 });
 
+test("validateBrowserHostAlias rejects values that ssh could interpret as options", () => {
+  assert.equal(validateBrowserHostAlias("laptop"), "laptop");
+  assert.equal(validateBrowserHostAlias("user@laptop.local"), "user@laptop.local");
+
+  for (const alias of ["-oProxyCommand=touch /tmp/pwned", " -l root", "laptop\nother", ""] ) {
+    assert.throws(
+      () => validateBrowserHostAlias(alias),
+      (err) => err instanceof RemoteAnnotationError && err.code === "SSH_INVALID_HOST_ALIAS"
+    );
+  }
+});
+
 test("isLoopbackPageUrl detects only loopback page URLs", () => {
   assert.equal(isLoopbackPageUrl("http://localhost:3000"), true);
   assert.equal(isLoopbackPageUrl("https://127.0.0.1:5173"), true);
@@ -86,9 +99,9 @@ test("isLoopbackPageUrl detects only loopback page URLs", () => {
   assert.equal(isLoopbackPageUrl(undefined), false);
 });
 
-test("planRemotePageAccess tunnels IPv4 loopback URLs and rewrites only the browser-facing port", () => {
+test("planRemotePageAccess tunnels IPv4 loopback URLs and rewrites the browser-facing host and port", () => {
   assert.deepEqual(planRemotePageAccess("http://localhost:3000/path?q=1#hash", 49152), {
-    url: "http://localhost:49152/path?q=1#hash",
+    url: "http://127.0.0.1:49152/path?q=1#hash",
     tunnel: {
       targetHost: "127.0.0.1",
       targetPort: 3000,
@@ -102,6 +115,17 @@ test("planRemotePageAccess tunnels IPv4 loopback URLs and rewrites only the brow
       targetHost: "127.0.0.1",
       targetPort: 443,
       browserPort: 49153,
+    },
+  });
+});
+
+test("planRemotePageAccess sends every IPv4 loopback URL to the reverse-tunnel bind address", () => {
+  assert.deepEqual(planRemotePageAccess("http://127.1.2.3:3000/path", 49154), {
+    url: "http://127.0.0.1:49154/path",
+    tunnel: {
+      targetHost: "127.0.0.1",
+      targetPort: 3000,
+      browserPort: 49154,
     },
   });
 });
@@ -121,6 +145,7 @@ test("planRemotePageAccess should preserve IPv4 loopback URL path, query, and ha
       assert.equal(browserUrl.pathname, originalUrl.pathname);
       assert.equal(browserUrl.search, originalUrl.search);
       assert.equal(browserUrl.hash, originalUrl.hash);
+      assert.equal(browserUrl.hostname, "127.0.0.1");
       assert.equal(Number(browserUrl.port || (originalUrl.protocol === "https:" ? 443 : 80)), browserPort);
       assert.deepEqual(plan.tunnel, {
         targetHost: "127.0.0.1",
