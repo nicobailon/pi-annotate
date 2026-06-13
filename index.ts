@@ -119,6 +119,10 @@ export default function (pi: ExtensionAPI) {
     hostConnection.send(msg);
   }
 
+  function sendToHostAndFlush(msg: object): Promise<void> {
+    return hostConnection.sendAndFlush(msg);
+  }
+
   function cleanupRemoteSession(requestId: number | null) {
     if (!requestId) return;
     const session = remoteSessions.get(requestId);
@@ -533,8 +537,7 @@ export default function (pi: ExtensionAPI) {
         };
 
         const onAbort = () => {
-          sendToHost({ type: "CANCEL", requestId, reason: "aborted" });
-          cleanup();
+          void sendToHostAndFlush({ type: "CANCEL", requestId, reason: "aborted" }).finally(cleanup);
           resolve({
             content: [{ type: "text", text: "Annotation was aborted." }],
             details: { aborted: true },
@@ -562,8 +565,7 @@ export default function (pi: ExtensionAPI) {
         
         // Set timeout
         timeoutId = setTimeout(() => {
-          sendToHost({ type: "CANCEL", requestId, reason: "timeout" });
-          cleanup();
+          void sendToHostAndFlush({ type: "CANCEL", requestId, reason: "timeout" }).finally(cleanup);
           resolve({
             content: [{ type: "text", text: `Annotation timed out after ${timeout}s` }],
             details: { timeout: true },

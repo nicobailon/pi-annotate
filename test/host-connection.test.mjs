@@ -111,6 +111,41 @@ test("createHostConnectionManager ignores stale data from a previous socket afte
   assert.deepEqual(messages, [{ type: "CURRENT" }]);
 });
 
+test("createHostConnectionManager can wait for a message write to flush", async () => {
+  // Arrange
+  const socket = new DeferredWriteSocket();
+  const manager = createHostConnectionManager({
+    defaultSocketPath: "/tmp/pi-annotate.sock",
+    defaultTokenPath: "/tmp/pi-annotate.token",
+    maxSocketBuffer: 1024,
+    createConnection: () => socket,
+    onMessage: () => {},
+    onConnectionLost: () => {},
+  });
+  const connect = manager.connect({ token: "token" });
+  socket.emit("connect");
+  await connect;
+
+  // Act
+  const flushed = manager.sendAndFlush({ type: "CANCEL" });
+  let resolved = false;
+  flushed.then(() => {
+    resolved = true;
+  });
+  await Promise.resolve();
+
+  // Assert
+  assert.equal(resolved, false);
+  assert.deepEqual(socket.writes.at(-1).message, { type: "CANCEL" });
+
+  // Act
+  socket.flushLastWrite();
+  await flushed;
+
+  // Assert
+  assert.equal(resolved, true);
+});
+
 // Helpers
 
 function nextSocket(sockets) {
@@ -123,8 +158,30 @@ class FakeSocket extends EventEmitter {
   destroyed = false;
   writes = [];
 
-  write(value) {
+  write(value, callback) {
     this.writes.push(JSON.parse(value));
+    callback?.();
+    return true;
+  }
+
+  destroy() {
+    this.destroyed = true;
+  }
+}
+
+class DeferredWriteSocket extends EventEmitter {
+  destroyed = false;
+  writes = [];
+
+  write(value, callback) {
+    const message = JSON.parse(value);
+    this.writes.push({ message, callback });
+    if (message.type === "AUTH") callback?.();
+    return true;
+  }
+
+  flushLastWrite() {
+    this.writes.at(-1)?.callback?.();
   }
 
   destroy() {

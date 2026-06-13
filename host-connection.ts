@@ -27,6 +27,7 @@ export interface HostConnectionManagerOptions {
 export interface HostConnectionManager {
   connect: (options?: HostConnectionOptions) => Promise<void>;
   send: (message: object) => void;
+  sendAndFlush: (message: object) => Promise<void>;
 }
 
 export function createHostConnectionManager(options: HostConnectionManagerOptions): HostConnectionManager {
@@ -129,7 +130,32 @@ export function createHostConnectionManager(options: HostConnectionManagerOption
     }
   }
 
-  return { connect, send };
+  function sendAndFlush(message: object): Promise<void> {
+    const socket = browserSocket;
+    if (!socket || socket.destroyed) return Promise.resolve();
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        socket.off("close", settle);
+        socket.off("error", settle);
+        resolve();
+      };
+
+      socket.once("close", settle);
+      socket.once("error", settle);
+
+      try {
+        socket.write(JSON.stringify(message) + "\n", settle);
+      } catch {
+        settle();
+      }
+    });
+  }
+
+  return { connect, send, sendAndFlush };
 }
 
 function socketPathEndpoint(path: string): HostEndpoint {
