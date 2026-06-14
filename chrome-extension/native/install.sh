@@ -30,8 +30,9 @@ fi
 
 echo "Using node at: $NODE_PATH"
 
-# Create wrapper script with absolute node path (Chrome's PATH doesn't include homebrew)
-HOST_PATH="$SCRIPT_DIR/host-wrapper.sh"
+# Create a machine-local wrapper with an absolute node path (Chrome's PATH doesn't include homebrew).
+# Keep the tracked host-wrapper.sh untouched so running the installer does not dirty the repo.
+HOST_PATH="$SCRIPT_DIR/host-wrapper.local.sh"
 cat > "$HOST_PATH" << EOF
 #!/bin/bash
 exec "$NODE_PATH" "$HOST_SCRIPT" "\$@"

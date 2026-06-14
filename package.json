@@ -37,6 +37,7 @@
     "banner.png",
     "demo.mp4",
     "chrome-extension/",
+    "!chrome-extension/native/host-wrapper.local.sh",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
