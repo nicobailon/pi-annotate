@@ -4,6 +4,16 @@ All notable changes to Pi Annotate.
 
 ## [Unreleased]
 
+### Added
+- Remote annotation from one Pi Session Host to a Chrome/Chromium Browser Host over SSH, including loopback page-access tunnels for `localhost` URLs.
+
+### Changed
+- Split annotation run orchestration and host connection lifecycle into dedicated modules with focused tests.
+- Native host installation now writes machine-local wrappers outside tracked package files.
+
+### Fixed
+- Remote annotation readiness failures now fail quickly with guidance about Browser Host setup instead of retrying confusing local tunnel endpoints.
+
 ## [0.4.3] - 2026-04-22
 
 ### Fixed
