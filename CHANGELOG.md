@@ -9,7 +9,7 @@ All notable changes to Pi Annotate.
 
 ### Changed
 - Split annotation run orchestration and host connection lifecycle into dedicated modules with focused tests.
-- Native host installation now writes machine-local wrappers outside tracked package files.
+- Native host installation now generates machine-local wrappers and stops shipping hardcoded wrapper paths.
 
 ### Fixed
 - Remote annotation readiness failures now fail quickly with guidance about Browser Host setup instead of retrying confusing local tunnel endpoints.

@@ -11,10 +11,11 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOST_SCRIPT="$SCRIPT_DIR/host.cjs"
 
-# Find node path (Chrome may not have node in PATH when launched from Dock)
-NODE_PATH=$(which node 2>/dev/null || echo "")
+# Resolve the real Node executable. Chrome may not inherit the user's shell PATH,
+# and version-manager shims can disappear after the install shell exits.
+NODE_PATH=$(node -p 'process.execPath' 2>/dev/null || echo "")
 if [ -z "$NODE_PATH" ]; then
-  # Try common locations
+  # Try common locations when node is not on PATH.
   for p in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do
     if [ -x "$p" ]; then
       NODE_PATH="$p"
@@ -28,10 +29,18 @@ if [ -z "$NODE_PATH" ]; then
   exit 1
 fi
 
+case "$NODE_PATH" in
+  *fnm_multishells*|*/.nvm/alias/*)
+    echo "Error: Node resolved to a temporary version-manager path: $NODE_PATH"
+    echo "Configure a stable default Node version, then rerun this installer."
+    exit 1
+    ;;
+esac
+
 echo "Using node at: $NODE_PATH"
 
-# Create a machine-local wrapper with an absolute node path (Chrome's PATH doesn't include homebrew).
-# Keep the tracked host-wrapper.sh untouched so running the installer does not dirty the repo.
+# Create a machine-local wrapper with absolute paths. This file is generated and
+# intentionally not tracked or published.
 HOST_PATH="$SCRIPT_DIR/host-wrapper.local.sh"
 cat > "$HOST_PATH" << EOF
 #!/bin/bash
