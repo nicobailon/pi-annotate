@@ -45,6 +45,66 @@ The popup shows your extension ID. Click **Copy** next to the install command, t
 
 This installs the native messaging manifest for Google Chrome, Google Chrome for Testing, and Chromium on macOS, plus the default/current config-home locations for those browsers on Linux. Fully quit and reopen that browser. The popup will show **Connected** when ready.
 
+## Remote Annotation Setup
+
+Remote annotation has two roles:
+
+- **Pi Session Host** — the machine where you run `/annotate` in Pi.
+- **Browser Host** — the machine whose Chrome/Chromium browser opens the page and shows the annotation UI.
+
+A same-machine setup uses one machine for both roles. A remote setup needs both roles configured.
+
+### Pi Session Host checklist
+
+On every machine where you run `/annotate`:
+
+1. Install or configure the Pi package source.
+2. Restart Pi after changing the package source or updating the package.
+3. Verify SSH can reach each Browser Host without prompts:
+
+```bash
+ssh -o BatchMode=yes laptop true
+```
+
+### Browser Host checklist
+
+On every machine whose browser you want to annotate:
+
+1. Load the Pi Annotate browser extension in Google Chrome, Google Chrome for Testing, or Chromium.
+2. Run the native host installer from the same package or checkout as the browser extension:
+
+```bash
+cd chrome-extension/native
+./install.sh <extension-id>
+```
+
+3. Fully quit and reopen that browser.
+4. Click the Pi Annotate extension icon. The popup should show **Connected**.
+
+The Browser Host does not need Pi running unless you also want to run `/annotate` from that machine.
+
+### Testing an unpublished branch on two machines
+
+When testing a local branch before it is published, use the same branch commit on every machine involved. Each machine may use its own checkout path.
+
+On each Pi Session Host, point Pi at that machine's local checkout, for example:
+
+```json
+{
+  "source": "/home/will/projects/pi-annotate",
+  "extensions": ["+index.ts"]
+}
+```
+
+On each Browser Host, load the unpacked browser extension from that checkout and rerun:
+
+```bash
+cd ~/projects/pi-annotate/chrome-extension/native
+./install.sh <extension-id>
+```
+
+Rerun the installer whenever you switch from the npm package to a local checkout, change checkout paths, change extension IDs, or update to a branch whose native host protocol changed. Then fully restart the browser. Restart Pi on any Pi Session Host whose package source or package version changed.
+
 ## Usage
 
 ```bash
@@ -54,15 +114,23 @@ This installs the native messaging manifest for Google Chrome, Google Chrome for
 /annotate laptop http://localhost:3000 # Uses laptop browser for a page served on this Pi Session Host
 ```
 
-Remote annotation uses your SSH config. The first non-URL argument is treated as a Browser Host Alias, so `laptop` must work non-interactively from the Pi Session Host:
+Remote annotation uses your SSH config. The first non-URL argument is treated as a Browser Host Alias.
+
+If you omit the URL, Pi Annotate uses the Browser Host's current tab. If you provide a loopback URL with `localhost` or `127.0.0.1`, the page is served by the Pi Session Host where `/annotate` runs. Pi Annotate creates a temporary SSH page-access tunnel so the Browser Host can load that page. For example, this command:
 
 ```bash
-ssh -o BatchMode=yes laptop true
+/annotate laptop http://localhost:3000
 ```
 
-The Browser Host must also have Chrome/Chromium, the Pi Annotate browser extension, and the native host installed. If SSH works but the Browser Host is not ready, open Chrome there, click the Pi Annotate extension icon, then retry.
+may print a Browser Host URL like this:
 
-In remote annotation, omitting the URL uses the Browser Host's current tab. Providing a loopback URL with `localhost` or `127.0.0.1` means the page is served by the Pi Session Host where `/annotate` is run; Pi Annotate creates a temporary SSH page-access tunnel so the Browser Host can load that page. IPv6 loopback URLs such as `http://[::1]:3000` are rejected in remote annotation; use `localhost` or `127.0.0.1` if the service listens on IPv4. Non-loopback URLs are passed to the Browser Host unchanged.
+```text
+Opening annotation mode on laptop: http://127.0.0.1:58341/
+```
+
+That rewritten `127.0.0.1` URL is expected. It is a temporary port on the Browser Host that forwards back to `localhost:3000` on the Pi Session Host.
+
+IPv6 loopback URLs such as `http://[::1]:3000` are rejected in remote annotation; use `localhost` or `127.0.0.1` if the service listens on IPv4. Non-loopback URLs are passed to the Browser Host unchanged.
 
 | Action | How |
 |--------|-----|
@@ -190,6 +258,8 @@ tail -f /tmp/pi-annotate-host.log                    # Native host logs
 | "restricted URL" error | Provide a URL: `/annotate https://example.com` |
 | Native host not connecting | Click extension icon → check status, re-run install, fully restart the supported browser |
 | "Extension ID mismatch" | Copy install command from popup, re-run |
+| `BROWSER_HOST_NOT_READY` in remote annotation | On the Browser Host, open Chrome/Chromium, click the Pi Annotate icon, verify **Connected**, and confirm the native host was installed from the same package or checkout as the Pi Session Host |
+| Remote annotation prints `http://127.0.0.1:<port>/` instead of your `localhost` URL | Expected for loopback URLs. That temporary Browser Host port forwards back to the Pi Session Host's original URL |
 | Socket errors | `ls -la /tmp/pi-annotate.sock` |
 
 **Verify native host:**
