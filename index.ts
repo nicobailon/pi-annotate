@@ -60,7 +60,7 @@ export default function (pi: ExtensionAPI) {
   // ─────────────────────────────────────────────────────────────────────
   // /annotate Command
   // ─────────────────────────────────────────────────────────────────────
-  
+
   const annotateHandler = async (args: string, ctx: AnnotationContext) => {
     currentCtx = ctx;
     await annotationRuns.startCommand(args, ctx);
