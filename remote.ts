@@ -441,15 +441,26 @@ export async function createRemoteAnnotationBridge({ browserHost, url }: { brows
       if (attempt < SSH_TUNNEL_ATTEMPTS && isRetryableTunnelStartupError(err)) {
         continue;
       }
-      throw err;
+      throw toBrowserHostReadinessError(browserHost, err);
     }
   }
 
   throw lastError instanceof Error ? lastError : new RemoteAnnotationError("REMOTE_PORT_UNAVAILABLE", `Could not allocate tunnel ports for '${browserHost}'.`);
 }
 
-function isRetryableTunnelStartupError(err: unknown): boolean {
+export function toBrowserHostReadinessError(browserHost: string, err: unknown): Error {
+  if (err instanceof RemoteAnnotationError && err.code === "SSH_TUNNEL_TIMEOUT") {
+    return new RemoteAnnotationError(
+      "BROWSER_HOST_NOT_READY",
+      `Browser Host '${browserHost}' did not answer Pi Annotate readiness PING through the SSH annotation tunnel. Open Chrome on '${browserHost}', click the Pi Annotate extension icon, and make sure the native host is installed from the same pi-annotate branch. The timed-out 127.0.0.1 port is the local annotation tunnel endpoint, not the page URL. (${err.message})`,
+      { cause: err }
+    );
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+export function isRetryableTunnelStartupError(err: unknown): boolean {
   if (!(err instanceof RemoteAnnotationError)) return false;
-  if (err.code !== "SSH_TUNNEL_FAILED" && err.code !== "SSH_TUNNEL_TIMEOUT") return false;
-  return /Address already in use|bind|cannot listen|port forwarding failed|remote port forwarding failed|Timed out/i.test(err.message);
+  if (err.code !== "SSH_TUNNEL_FAILED") return false;
+  return /Address already in use|bind|cannot listen|port forwarding failed|remote port forwarding failed/i.test(err.message);
 }

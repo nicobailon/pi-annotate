@@ -13,6 +13,8 @@ import {
   planRemotePageAccess,
   validateBrowserHostAlias,
   waitForPiAnnotateEndpoint,
+  isRetryableTunnelStartupError,
+  toBrowserHostReadinessError,
 } from "../remote.ts";
 
 test("parseAnnotateCommandArgs preserves same-host annotate forms", () => {
@@ -215,6 +217,36 @@ test("buildSshTunnelArgs adds explicit loopback reverse forwards without remote 
     "laptop",
   ]);
   assert.equal(args.some((arg) => /node|-e|StreamLocalBindUnlink/.test(arg)), false);
+});
+
+test("isRetryableTunnelStartupError does not retry Browser Host readiness timeouts", () => {
+  assert.equal(
+    isRetryableTunnelStartupError(new RemoteAnnotationError(
+      "SSH_TUNNEL_TIMEOUT",
+      "Timed out waiting for Pi Annotate endpoint '127.0.0.1:61462'."
+    )),
+    false
+  );
+
+  assert.equal(
+    isRetryableTunnelStartupError(new RemoteAnnotationError(
+      "SSH_TUNNEL_FAILED",
+      "SSH tunnel exited before it became ready. bind: Address already in use"
+    )),
+    true
+  );
+});
+
+test("toBrowserHostReadinessError explains readiness timeout without confusing it for the page URL", () => {
+  const err = toBrowserHostReadinessError(
+    "laptop",
+    new RemoteAnnotationError("SSH_TUNNEL_TIMEOUT", "Timed out waiting for Pi Annotate endpoint '127.0.0.1:61462'.")
+  );
+
+  assert.equal(err.code, "BROWSER_HOST_NOT_READY");
+  assert.match(err.message, /Browser Host 'laptop' did not answer Pi Annotate readiness PING/);
+  assert.match(err.message, /native host is installed from the same pi-annotate branch/);
+  assert.match(err.message, /annotation tunnel endpoint, not the page URL/);
 });
 
 test("waitForPiAnnotateEndpoint rejects unrelated TCP listeners", async () => {
