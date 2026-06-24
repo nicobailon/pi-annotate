@@ -37,13 +37,21 @@ Restart pi to load the extension.
 
 ### 3. Install Native Host
 
-The popup shows your extension ID. Click **Copy** next to the install command, then run it from `chrome-extension/native/` in the installed package:
+The popup shows your extension ID. Click **Copy** next to the install command, then run it from `chrome-extension/native/` in the installed package.
+
+macOS/Linux:
 
 ```bash
 ./install.sh <extension-id>
 ```
 
-This installs the native messaging manifest for Google Chrome, Google Chrome for Testing, and Chromium on macOS, plus the default/current config-home locations for those browsers on Linux. Fully quit and reopen that browser. The popup will show **Connected** when ready.
+Windows PowerShell/cmd:
+
+```bat
+install-windows.cmd <extension-id>
+```
+
+The macOS/Linux installer writes the native messaging manifest for Google Chrome, Google Chrome for Testing, and Chromium. The Windows installer writes the HKCU native messaging registry entries for Google Chrome, Google Chrome for Testing, Chromium, and Microsoft Edge. Fully quit and reopen that browser. The popup will show **Connected** when ready.
 
 ## Usage
 
@@ -138,7 +146,7 @@ Debug mode adds computed styles, parent context, and CSS variables per element. 
 
 ```
 Pi Extension (index.ts)
-    ↕ Unix Socket (/tmp/pi-annotate.sock)
+    ↕ Unix socket (/tmp/pi-annotate.sock) or Windows named pipe (\\.\pipe\pi-annotate.sock)
 Native Host (host.cjs)
     ↕ Browser Native Messaging
 Browser Extension (background.js → content.js)
@@ -153,14 +161,15 @@ Browser Extension (background.js → content.js)
 | `chrome-extension/native/host.cjs` | Socket ↔ native messaging bridge |
 | `chrome-extension/popup.html` | Connection status + setup |
 
-Auth token generated per-run at `/tmp/pi-annotate.token`. Socket and token files use 0600 permissions.
+Auth token generated per-run at `/tmp/pi-annotate.token` on macOS/Linux or `%TEMP%\pi-annotate.token` on Windows. Socket and token files use 0600 permissions where supported.
 
 ## Development
 
 No build step. Edit `content.js` or `background.js` directly, reload at `chrome://extensions`. Pi extension (TypeScript) loads via jiti — restart pi after changes.
 
 ```bash
-tail -f /tmp/pi-annotate-host.log                    # Native host logs
+tail -f /tmp/pi-annotate-host.log                    # Native host logs on macOS/Linux
+# Windows log: %TEMP%\pi-annotate-host.log
 # chrome://extensions → Pi Annotate → service worker  # Background logs
 # DevTools on target page                              # Content script logs
 ```
@@ -173,7 +182,7 @@ tail -f /tmp/pi-annotate-host.log                    # Native host logs
 | "restricted URL" error | Provide a URL: `/annotate https://example.com` |
 | Native host not connecting | Click extension icon → check status, re-run install, fully restart the supported browser |
 | "Extension ID mismatch" | Copy install command from popup, re-run |
-| Socket errors | `ls -la /tmp/pi-annotate.sock` |
+| Socket errors | macOS/Linux: `ls -la /tmp/pi-annotate.sock`; Windows: check `%TEMP%\pi-annotate-host.log` |
 
 **Verify native host:**
 - macOS Google Chrome: `cat ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.pi.annotate.json`
@@ -183,6 +192,10 @@ tail -f /tmp/pi-annotate-host.log                    # Native host logs
 - Linux Google Chrome for Testing (default path): `cat ~/.config/google-chrome-for-testing/NativeMessagingHosts/com.pi.annotate.json`
 - Linux Chromium (default path): `cat ~/.config/chromium/NativeMessagingHosts/com.pi.annotate.json`
 - Linux with custom config home: `echo "${CHROME_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}}"`
+- Windows Google Chrome: `reg query HKCU\Software\Google\Chrome\NativeMessagingHosts\com.pi.annotate /ve`
+- Windows Google Chrome for Testing: `reg query "HKCU\Software\Google\Chrome for Testing\NativeMessagingHosts\com.pi.annotate" /ve`
+- Windows Chromium: `reg query HKCU\Software\Chromium\NativeMessagingHosts\com.pi.annotate /ve`
+- Windows Microsoft Edge: `reg query HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.pi.annotate /ve`
 
 If your Linux browser uses a different XDG config root, export `CHROME_CONFIG_HOME` or `XDG_CONFIG_HOME` before running `./install.sh <extension-id>`. Custom `--user-data-dir` layouts are not handled by this installer.
 

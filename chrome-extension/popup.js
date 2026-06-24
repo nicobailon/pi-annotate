@@ -1,7 +1,10 @@
 // Pi Annotate - Popup Script
 
 const extId = chrome.runtime.id;
-const installCmd = `./install.sh ${extId}`;
+const platform = navigator.platform.toUpperCase();
+const isMac = platform.indexOf('MAC') >= 0;
+const isWindows = platform.indexOf('WIN') >= 0;
+const installCmd = isWindows ? `install-windows.cmd ${extId}` : `./install.sh ${extId}`;
 
 // Elements
 const extIdInput = document.getElementById('ext-id');
@@ -17,7 +20,6 @@ extIdInput.value = extId;
 installCmdInput.value = installCmd;
 
 // Platform-aware displays
-const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 const shortcutEl = document.getElementById('shortcut-key');
 if (shortcutEl) {
   shortcutEl.textContent = isMac ? '⌘ Shift P' : 'Ctrl+Shift+P';
