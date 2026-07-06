@@ -111,6 +111,15 @@
   let markersContainer = null;
   let styleEl = null;
   
+  // Panel dock orientation: "bottom" | "right" | "top" | "left"
+  let currentOrientation = (() => {
+    try {
+      const saved = localStorage.getItem("pi-annotate-orientation");
+      if (saved === "bottom" || saved === "right" || saved === "top" || saved === "left") return saved;
+    } catch {}
+    return "right";
+  })();
+  
   // ─────────────────────────────────────────────────────────────────────
   // Styles
   // ─────────────────────────────────────────────────────────────────────
@@ -404,14 +413,11 @@
        ═══════════════════════════════════════════════════════════════════ */
     #pi-panel {
       position: fixed;
-      bottom: 0; left: 0; right: 0;
       background: var(--pi-bg-card);
       color: var(--pi-fg);
       font-family: var(--pi-font-ui);
       padding: 10px 16px;
       z-index: ${Z_INDEX_PANEL};
-      box-shadow: 0 -4px 24px var(--pi-shadow);
-      border-top: 1px solid var(--pi-border-muted);
     }
     
     #pi-panel * { box-sizing: border-box; }
@@ -423,6 +429,7 @@
       margin-bottom: 8px;
       padding-bottom: 8px;
       border-bottom: 1px solid var(--pi-bg-elevated);
+      flex-wrap: wrap;
     }
     
     .pi-logo { 
@@ -443,11 +450,25 @@
     }
     .pi-close:hover { color: var(--pi-error); }
     
+    .pi-orient {
+      background: var(--pi-bg-elevated);
+      border: 1px solid var(--pi-border-muted);
+      border-radius: var(--pi-radius);
+      color: var(--pi-fg-muted);
+      font-size: 13px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 4px 7px;
+      transition: all 0.15s;
+    }
+    .pi-orient:hover { background: var(--pi-bg-hover); color: var(--pi-accent); }
+    
     .pi-toolbar {
       display: flex;
       align-items: center;
       gap: 12px;
       margin-bottom: 8px;
+      flex-wrap: wrap;
     }
     
     .pi-mode-toggle {
@@ -707,6 +728,7 @@
     createMarkers();
     createNotesContainer();
     createPanel();
+    applyOrientation(currentOrientation);
     
     // Add listeners
     document.addEventListener("mousemove", onMouseMove, true);
@@ -887,6 +909,7 @@
       <div class="pi-header">
         <span class="pi-logo">π Annotate</span>
         <span class="pi-hint">Click elements • ${ALT_KEY_LABEL}+scroll cycles parents • ESC to close</span>
+        <button class="pi-orient" id="pi-orient" title="Dock panel (click to change side)">⇲</button>
         <button class="pi-close" id="pi-close" title="Close (ESC)">×</button>
       </div>
       <div class="pi-toolbar">
@@ -929,6 +952,11 @@
     document.body.appendChild(panelEl);
     
     document.getElementById("pi-close").addEventListener("click", handleCancel);
+    document.getElementById("pi-orient").addEventListener("click", () => {
+      const order = ["bottom", "right", "top", "left"];
+      const idx = order.indexOf(currentOrientation);
+      applyOrientation(order[(idx + 1) % order.length]);
+    });
     document.getElementById("pi-cancel").addEventListener("click", handleCancel);
     document.getElementById("pi-submit").addEventListener("click", handleSubmit);
     
@@ -1003,31 +1031,143 @@
   // Note Card Functions
   // ─────────────────────────────────────────────────────────────────────
   
+  // Returns the viewport edges reserved by the docked panel.
+  function getPanelEdges() {
+    const panel = document.getElementById("pi-panel");
+    const orient = currentOrientation;
+    if (!panel || (orient !== "left" && orient !== "right" && orient !== "top" && orient !== "bottom")) {
+      return { top: 0, right: 0, bottom: 0, left: 0 };
+    }
+    if (orient === "left" || orient === "right") {
+      const w = panel.offsetWidth || 320;
+      return orient === "right"
+        ? { top: 0, right: w, bottom: 0, left: 0 }
+        : { top: 0, right: 0, bottom: 0, left: w };
+    }
+    const h = panel.offsetHeight || 96;
+    return orient === "bottom"
+      ? { top: 0, right: 0, bottom: h, left: 0 }
+      : { top: h, right: 0, bottom: 0, left: 0 };
+  }
+  
+  // Dock the panel to a side and persist the choice.
+  function applyOrientation(orient) {
+    const panel = document.getElementById("pi-panel");
+    if (!panel) return;
+    const arrows = { bottom: "▼", right: "▶", top: "▲", left: "◀" };
+    if (orient !== "bottom" && orient !== "right" && orient !== "top" && orient !== "left") orient = "right";
+    
+    // Reset every dock property, then set the ones for this orientation.
+    panel.style.top = "auto";
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+    panel.style.left = "auto";
+    panel.style.width = "";
+    panel.style.maxWidth = "";
+    panel.style.overflowY = "";
+    panel.style.borderTop = "none";
+    panel.style.borderBottom = "none";
+    panel.style.borderLeft = "none";
+    panel.style.borderRight = "none";
+    
+    if (orient === "bottom") {
+      panel.style.bottom = "0";
+      panel.style.left = "0";
+      panel.style.right = "0";
+      panel.style.boxShadow = "0 -4px 24px var(--pi-shadow)";
+      panel.style.borderTop = "1px solid var(--pi-border-muted)";
+    } else if (orient === "top") {
+      panel.style.top = "0";
+      panel.style.left = "0";
+      panel.style.right = "0";
+      panel.style.boxShadow = "0 4px 24px var(--pi-shadow)";
+      panel.style.borderBottom = "1px solid var(--pi-border-muted)";
+    } else if (orient === "left") {
+      panel.style.top = "0";
+      panel.style.left = "0";
+      panel.style.bottom = "0";
+      panel.style.width = "320px";
+      panel.style.maxWidth = "60vw";
+      panel.style.overflowY = "auto";
+      panel.style.boxShadow = "4px 0 24px var(--pi-shadow)";
+      panel.style.borderRight = "1px solid var(--pi-border-muted)";
+    } else {
+      panel.style.top = "0";
+      panel.style.right = "0";
+      panel.style.bottom = "0";
+      panel.style.width = "320px";
+      panel.style.maxWidth = "60vw";
+      panel.style.overflowY = "auto";
+      panel.style.boxShadow = "-4px 0 24px var(--pi-shadow)";
+      panel.style.borderLeft = "1px solid var(--pi-border-muted)";
+    }
+    
+    currentOrientation = orient;
+    try { localStorage.setItem("pi-annotate-orientation", orient); } catch {}
+    
+    const btn = document.getElementById("pi-orient");
+    if (btn) {
+      btn.textContent = arrows[orient] || "⇲";
+      btn.title = `Dock: ${orient} (click to change side)`;
+    }
+    
+    // Re-clamp existing notes to the new available area.
+    repositionNotesForPanel();
+  }
+  
+  // Re-fit open note cards to the area not occupied by the panel.
+  function repositionNotesForPanel() {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const e = getPanelEdges();
+    const availLeft = e.left;
+    const availTop = e.top;
+    const availRight = vw - e.right;
+    const availBottom = vh - e.bottom;
+    openNotes.forEach(index => {
+      const card = notesContainer.querySelector(`[data-index="${index}"]`);
+      if (!card) return;
+      const w = card.offsetWidth || 280;
+      const h = card.offsetHeight || 150;
+      const x = Math.max(availLeft + 16, Math.min(card.offsetLeft, availRight - w - 16));
+      const y = Math.max(availTop + 16, Math.min(card.offsetTop, availBottom - h - 16));
+      card.style.left = x + "px";
+      card.style.top = y + "px";
+      notePositions.set(index, { x, y });
+    });
+    updateConnectors();
+  }
+  
   function calculateNotePosition(element, cardWidth = 280, cardHeight = 150) {
     const rect = element.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
+    const e = getPanelEdges();
+    const availLeft = e.left, availTop = e.top;
+    const availRight = vw - e.right, availBottom = vh - e.bottom;
     const margin = 16;
     
+    const clampX = x => Math.max(availLeft + margin, Math.min(x, availRight - cardWidth - margin));
+    const clampY = y => Math.max(availTop + margin, Math.min(y, availBottom - cardHeight - margin));
+    
     // Try right side first
-    if (rect.right + margin + cardWidth < vw) {
-      return { x: rect.right + margin, y: Math.max(margin, rect.top) };
+    if (rect.right + margin + cardWidth < availRight) {
+      return { x: clampX(rect.right + margin), y: clampY(rect.top) };
     }
     // Try left side
-    if (rect.left - margin - cardWidth > 0) {
-      return { x: rect.left - margin - cardWidth, y: Math.max(margin, rect.top) };
+    if (rect.left - margin - cardWidth > availLeft) {
+      return { x: clampX(rect.left - margin - cardWidth), y: clampY(rect.top) };
     }
     // Try below
-    if (rect.bottom + margin + cardHeight < vh - panelHeight) {
-      return { x: Math.max(margin, rect.left), y: rect.bottom + margin };
+    if (rect.bottom + margin + cardHeight < availBottom) {
+      return { x: clampX(rect.left), y: clampY(rect.bottom + margin) };
     }
     // Try above
-    if (rect.top - margin - cardHeight > 0) {
-      return { x: Math.max(margin, rect.left), y: rect.top - margin - cardHeight };
+    if (rect.top - margin - cardHeight > availTop) {
+      return { x: clampX(rect.left), y: clampY(rect.top - margin - cardHeight) };
     }
-    // Fallback: offset from element
-    return { x: Math.min(rect.right + margin, vw - cardWidth - margin), y: Math.max(margin, rect.top) };
+    // Fallback: offset from element, clamped to usable area
+    return { x: clampX(rect.right + margin), y: clampY(rect.top) };
   }
   
   function hasOverlap(rect1, rect2, margin = 8) {
@@ -1068,12 +1208,12 @@
       attempts++;
     }
     
-    // Clamp to viewport
+    // Clamp to the area not occupied by the panel
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
-    adjusted.x = Math.max(16, Math.min(adjusted.x, vw - cardSize.width - 16));
-    adjusted.y = Math.max(16, Math.min(adjusted.y, vh - cardSize.height - panelHeight - 16));
+    const e = getPanelEdges();
+    adjusted.x = Math.max(e.left + 16, Math.min(adjusted.x, vw - e.right - cardSize.width - 16));
+    adjusted.y = Math.max(e.top + 16, Math.min(adjusted.y, vh - e.bottom - cardSize.height - 16));
     
     return adjusted;
   }
@@ -1634,26 +1774,36 @@
   
   function handleResize() {
     updateBadges();
-    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const e = getPanelEdges();
+    const availLeft = e.left, availTop = e.top;
+    const availRight = vw - e.right, availBottom = vh - e.bottom;
     
     openNotes.forEach(index => {
       const card = notesContainer.querySelector(`[data-index="${index}"]`);
       if (!card) return;
       
       const rect = card.getBoundingClientRect();
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
       
       let newX = card.offsetLeft;
       let newY = card.offsetTop;
       let moved = false;
       
-      if (rect.right > vw - 16) {
-        newX = vw - rect.width - 16;
+      if (rect.right > availRight - 16) {
+        newX = availRight - rect.width - 16;
         moved = true;
       }
-      if (rect.bottom > vh - panelHeight - 16) {
-        newY = vh - rect.height - panelHeight - 16;
+      if (rect.left < availLeft + 16) {
+        newX = availLeft + 16;
+        moved = true;
+      }
+      if (rect.bottom > availBottom - 16) {
+        newY = availBottom - rect.height - 16;
+        moved = true;
+      }
+      if (rect.top < availTop + 16) {
+        newY = availTop + 16;
         moved = true;
       }
       
