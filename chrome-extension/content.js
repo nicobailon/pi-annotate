@@ -413,6 +413,8 @@
        ═══════════════════════════════════════════════════════════════════ */
     #pi-panel {
       position: fixed;
+      display: flex;
+      flex-direction: column;
       background: var(--pi-bg-card);
       color: var(--pi-fg);
       font-family: var(--pi-font-ui);
@@ -437,7 +439,7 @@
       font-weight: 700; 
       color: var(--pi-accent);
     }
-    .pi-hint { color: var(--pi-fg-dim); font-size: 11px; margin-left: auto; }
+    .pi-hint { color: var(--pi-fg-dim); font-size: 11px; }
     
     .pi-close {
       background: none;
@@ -450,18 +452,27 @@
     }
     .pi-close:hover { color: var(--pi-error); }
     
-    .pi-orient {
-      background: var(--pi-bg-elevated);
-      border: 1px solid var(--pi-border-muted);
-      border-radius: var(--pi-radius);
-      color: var(--pi-fg-muted);
-      font-size: 13px;
-      line-height: 1;
-      cursor: pointer;
-      padding: 4px 7px;
-      transition: all 0.15s;
+    .pi-dock {
+      display: inline-flex;
+      align-items: center;
+      gap: 1px;
     }
-    .pi-orient:hover { background: var(--pi-bg-hover); color: var(--pi-accent); }
+    .pi-dock-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: none;
+      border-radius: 4px;
+      color: var(--pi-fg-dim);
+      cursor: pointer;
+      padding: 4px 3px;
+      line-height: 0;
+      transition: color 0.15s, background 0.15s;
+    }
+    .pi-dock-btn:hover { background: var(--pi-bg-hover); color: var(--pi-fg); }
+    .pi-dock-btn.active { color: var(--pi-accent); }
+    .pi-dock-btn svg { display: block; pointer-events: none; }
     
     .pi-toolbar {
       display: flex;
@@ -621,28 +632,37 @@
       outline-offset: 2px !important;
     }
     
+    .pi-bottom {
+      margin-top: auto;
+      padding-top: 8px;
+    }
+    
     .pi-context-row {
       margin-bottom: 8px;
     }
     
-    .pi-context-row input {
+    .pi-context-row textarea {
       width: 100%;
+      min-height: 56px;
+      resize: vertical;
       background: var(--pi-bg-body);
       border: 1px solid var(--pi-border-muted);
-      border-radius: var(--pi-radius);
+      border-radius: 12px;
       color: var(--pi-fg);
       font-family: inherit;
       font-size: 13px;
-      padding: 8px 12px;
+      line-height: 1.4;
+      padding: 10px 14px;
+      box-sizing: border-box;
     }
     
-    .pi-context-row input:focus {
+    .pi-context-row textarea:focus {
       outline: none;
       border-color: var(--pi-accent);
       box-shadow: 0 0 0 3px var(--pi-focus-ring);
     }
     
-    .pi-context-row input::placeholder { color: var(--pi-fg-dim); }
+    .pi-context-row textarea::placeholder { color: var(--pi-fg-dim); }
     
     .pi-actions {
       display: flex;
@@ -908,8 +928,13 @@
     panelEl.innerHTML = `
       <div class="pi-header">
         <span class="pi-logo">π Annotate</span>
+        <div class="pi-dock" id="pi-dock" title="Panel position (click a side)">
+          <button class="pi-dock-btn" data-side="top" aria-label="Dock top" title="Dock top"><svg width="14" height="14" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-opacity="0.4"/><rect x="2" y="2" width="12" height="3.5" rx="1.5" fill="currentColor"/></svg></button>
+          <button class="pi-dock-btn" data-side="left" aria-label="Dock left" title="Dock left"><svg width="14" height="14" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-opacity="0.4"/><rect x="2" y="2" width="3.5" height="12" rx="1.5" fill="currentColor"/></svg></button>
+          <button class="pi-dock-btn" data-side="right" aria-label="Dock right" title="Dock right"><svg width="14" height="14" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-opacity="0.4"/><rect x="10.5" y="2" width="3.5" height="12" rx="1.5" fill="currentColor"/></svg></button>
+          <button class="pi-dock-btn" data-side="bottom" aria-label="Dock bottom" title="Dock bottom"><svg width="14" height="14" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-opacity="0.4"/><rect x="2" y="10.5" width="12" height="3.5" rx="1.5" fill="currentColor"/></svg></button>
+        </div>
         <span class="pi-hint">Click elements • ${ALT_KEY_LABEL}+scroll cycles parents • ESC to close</span>
-        <button class="pi-orient" id="pi-orient" title="Dock panel (click to change side)">⇲</button>
         <button class="pi-close" id="pi-close" title="Close (ESC)">×</button>
       </div>
       <div class="pi-toolbar">
@@ -939,24 +964,28 @@
           <span class="pi-etch-badge" id="pi-etch-count" style="display:none"></span>
         </label>
       </div>
-      <div class="pi-context-row">
-        <input type="text" id="pi-context" placeholder="General context (optional)..." />
-      </div>
-      <div class="pi-actions">
-        <div class="pi-buttons">
-          <button class="pi-btn pi-btn-cancel" id="pi-cancel">Cancel</button>
-          <button class="pi-btn pi-btn-submit" id="pi-submit">Submit</button>
+      <div class="pi-bottom">
+        <div class="pi-context-row">
+          <textarea id="pi-context" rows="2" placeholder="General context (optional)..."></textarea>
+        </div>
+        <div class="pi-actions">
+          <div class="pi-buttons">
+            <button class="pi-btn pi-btn-cancel" id="pi-cancel">Cancel</button>
+            <button class="pi-btn pi-btn-submit" id="pi-submit">Submit</button>
+          </div>
         </div>
       </div>
     `;
     document.body.appendChild(panelEl);
     
     document.getElementById("pi-close").addEventListener("click", handleCancel);
-    document.getElementById("pi-orient").addEventListener("click", () => {
-      const order = ["bottom", "right", "top", "left"];
-      const idx = order.indexOf(currentOrientation);
-      applyOrientation(order[(idx + 1) % order.length]);
-    });
+    const dockEl = document.getElementById("pi-dock");
+    if (dockEl) {
+      dockEl.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-side]");
+        if (btn) applyOrientation(btn.dataset.side);
+      });
+    }
     document.getElementById("pi-cancel").addEventListener("click", handleCancel);
     document.getElementById("pi-submit").addEventListener("click", handleSubmit);
     
@@ -1054,7 +1083,6 @@
   function applyOrientation(orient) {
     const panel = document.getElementById("pi-panel");
     if (!panel) return;
-    const arrows = { bottom: "▼", right: "▶", top: "▲", left: "◀" };
     if (orient !== "bottom" && orient !== "right" && orient !== "top" && orient !== "left") orient = "right";
     
     // Reset every dock property, then set the ones for this orientation.
@@ -1105,11 +1133,9 @@
     currentOrientation = orient;
     try { localStorage.setItem("pi-annotate-orientation", orient); } catch {}
     
-    const btn = document.getElementById("pi-orient");
-    if (btn) {
-      btn.textContent = arrows[orient] || "⇲";
-      btn.title = `Dock: ${orient} (click to change side)`;
-    }
+    document.querySelectorAll("#pi-dock .pi-dock-btn").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.side === orient);
+    });
     
     // Re-clamp existing notes to the new available area.
     repositionNotesForPanel();

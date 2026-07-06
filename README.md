@@ -60,7 +60,7 @@ This installs the native messaging manifest for Google Chrome, Google Chrome for
 | Add comment | Type in note card textarea |
 | Toggle screenshot | 📷 button in note card header |
 | Reposition note | Drag by header |
-| Change panel dock | `⇲` button in header (bottom → right → top → left) |
+| Change panel dock | 4 side icons in header (top/left/right/bottom); active side is highlighted |
 | Scroll to element | Click selector in note card |
 | Toggle note | Click numbered badge |
 | Expand/collapse all | ▼/▲ buttons in toolbar |
@@ -74,7 +74,7 @@ This installs the native messaging manifest for Google Chrome, Google Chrome for
 
 **Inline Note Cards** — Draggable floating cards with per-element comments, SVG connectors linking notes to elements, click-to-scroll, and per-element screenshot toggles.
 
-**Dockable Panel** — The toolbar panel can be docked to any side of the viewport. Click the `⇲` button in the header to cycle between bottom → right → top → left. The panel defaults to the right side and remembers your choice (per-origin via `localStorage`). Note cards and connectors automatically avoid the panel regardless of which side it's docked to.
+**Dockable Panel** — The toolbar panel can be docked to any side of the viewport. Four small icons next to the logo in the header let you pick top/left/right/bottom directly; the active side is highlighted. The panel defaults to the right side and remembers your choice (per-origin via `localStorage`). Note cards and connectors automatically avoid the panel regardless of which side it's docked to. When docked to a side, the panel becomes a flex column with the context input (a larger, rounded textarea) and action buttons pinned to the bottom.
 
 **Screenshots** — Individual crops per element (20px padding) or full-page mode with numbered badges drawn on the screenshot to identify elements. Toggle per element with the 📷 button.
 
