@@ -1,7 +1,7 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-EXTENSION_ID="$1"
+EXTENSION_ID="${1:-}"
 if [ -z "$EXTENSION_ID" ]; then
   echo "Usage: $0 <extension-id>"
   echo "Get the extension ID from chrome://extensions after loading unpacked"
@@ -11,20 +11,31 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOST_SCRIPT="$SCRIPT_DIR/host.cjs"
 
-# Find node path (Chrome may not have node in PATH when launched from Dock)
-NODE_PATH=$(which node 2>/dev/null || echo "")
-if [ -z "$NODE_PATH" ]; then
-  # Try common locations
-  for p in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do
-    if [ -x "$p" ]; then
-      NODE_PATH="$p"
+# Chrome does not inherit the shell PATH. Ask Node for its real executable path
+# instead of saving a fnm/asdf/mise shim that can disappear after this shell exits.
+NODE_PATH=""
+NODE_COMMAND="$(command -v node 2>/dev/null || true)"
+if [ -n "$NODE_COMMAND" ]; then
+  NODE_PATH="$("$NODE_COMMAND" -p 'process.execPath' 2>/dev/null || true)"
+fi
+
+case "$NODE_PATH" in
+  *fnm_multishells*|*/.asdf/shims/*|*/mise/shims/*)
+    NODE_PATH=""
+    ;;
+esac
+
+if [ -z "$NODE_PATH" ] || [ ! -x "$NODE_PATH" ]; then
+  for path in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do
+    if [ -x "$path" ]; then
+      NODE_PATH="$path"
       break
     fi
   done
 fi
 
-if [ -z "$NODE_PATH" ]; then
-  echo "Error: Could not find node. Please install Node.js."
+if [ -z "$NODE_PATH" ] || [ ! -x "$NODE_PATH" ]; then
+  echo "Error: Could not find a stable Node.js executable. Install Node.js or configure a default fnm/asdf/mise version."
   exit 1
 fi
 

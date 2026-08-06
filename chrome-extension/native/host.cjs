@@ -2,9 +2,11 @@
 const net = require("net");
 const fs = require("fs");
 
-const SOCKET_PATH = "/tmp/pi-annotate.sock";
-const TOKEN_PATH = "/tmp/pi-annotate.token";
-const LOG_FILE = "/tmp/pi-annotate-host.log";
+const SOCKET_PATH = process.env.PI_ANNOTATE_SOCKET || "/tmp/pi-annotate.sock";
+const TOKEN_PATH = process.env.PI_ANNOTATE_TOKEN || "/tmp/pi-annotate.token";
+const PID_PATH = process.env.PI_ANNOTATE_PID || "/tmp/pi-annotate-host.pid";
+const LOCK_PATH = process.env.PI_ANNOTATE_LOCK || `${PID_PATH}.lock`;
+const LOG_FILE = process.env.PI_ANNOTATE_LOG || "/tmp/pi-annotate-host.log";
 const MAX_NATIVE_MESSAGE_BYTES = 32 * 1024 * 1024; // 32MB (increased from 8MB for edit capture payloads)
 const MAX_SOCKET_BUFFER = 32 * 1024 * 1024; // 32MB
 const MAX_LOG_BYTES = 5 * 1024 * 1024; // 5MB
@@ -36,11 +38,152 @@ const log = (msg) => {
 
 log("Host starting...");
 
-// Clean up old socket
-try {
-  fs.unlinkSync(SOCKET_PATH);
-} catch (err) {
-  reportFsError(`Failed to remove old socket ${SOCKET_PATH}`, err);
+function readPidFile(path) {
+  try {
+    const pid = Number.parseInt(fs.readFileSync(path, "utf8").trim(), 10);
+    return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+function readPid() {
+  return readPidFile(PID_PATH);
+}
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function socketIsLive() {
+  return new Promise((resolve) => {
+    const socket = net.createConnection(SOCKET_PATH);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", () => resolve(false));
+  });
+}
+
+let ownsLock = false;
+
+async function stopProcess(pid, label) {
+  if (!pid || pid === process.pid || !isAlive(pid)) return;
+  log(`Stopping ${label} ${pid}`);
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch (err) {
+    throw new Error(`Failed to stop ${label} ${pid}: ${err.message}`);
+  }
+
+  for (let i = 0; i < 20; i++) {
+    await wait(50);
+    if (!isAlive(pid)) return;
+  }
+  throw new Error(`${label} ${pid} did not exit`);
+}
+
+function tryCreateHostLock() {
+  const tempPath = `${LOCK_PATH}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tempPath, String(process.pid), { mode: 0o600 });
+  try {
+    fs.linkSync(tempPath, LOCK_PATH);
+    ownsLock = true;
+    return true;
+  } catch (err) {
+    const code = err && typeof err === "object" && "code" in err ? err.code : "";
+    if (code !== "EEXIST") throw err;
+    return false;
+  } finally {
+    try {
+      fs.unlinkSync(tempPath);
+    } catch (err) {
+      reportFsError(`Failed to remove temp lock ${tempPath}`, err);
+    }
+  }
+}
+
+async function acquireHostLock() {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    if (tryCreateHostLock()) return;
+
+    const lockPid = readPidFile(LOCK_PATH);
+    if (!lockPid) {
+      await wait(50);
+      continue;
+    }
+
+    if (lockPid !== process.pid && isAlive(lockPid)) {
+      await wait(50);
+      continue;
+    }
+
+    if (readPidFile(LOCK_PATH) === lockPid) {
+      try {
+        fs.unlinkSync(LOCK_PATH);
+      } catch (err) {
+        reportFsError(`Failed to remove stale lock ${LOCK_PATH}`, err);
+        await wait(50);
+      }
+    } else {
+      await wait(50);
+    }
+  }
+  throw new Error(`Failed to acquire native host lock ${LOCK_PATH}`);
+}
+
+async function takeOverHost() {
+  const previousPid = readPid();
+  await stopProcess(previousPid, "previous host");
+
+  const recordedPid = readPid();
+  if (recordedPid && recordedPid !== process.pid) {
+    if (isAlive(recordedPid)) {
+      throw new Error(`Native host ${recordedPid} is still running`);
+    }
+    fs.unlinkSync(PID_PATH);
+  }
+
+  if (await socketIsLive()) {
+    throw new Error(`Native host socket ${SOCKET_PATH} is already live without an owned pid file`);
+  }
+
+  try {
+    fs.unlinkSync(SOCKET_PATH);
+  } catch (err) {
+    reportFsError(`Failed to remove stale socket ${SOCKET_PATH}`, err);
+  }
+
+  fs.writeFileSync(PID_PATH, String(process.pid), { mode: 0o600 });
+}
+
+function ownsPidFile() {
+  return readPid() === process.pid;
+}
+
+function ownsLockFile() {
+  return readPidFile(LOCK_PATH) === process.pid;
+}
+
+function releaseHostLock() {
+  if (!ownsLock || !ownsLockFile()) return;
+  try {
+    fs.unlinkSync(LOCK_PATH);
+  } catch (err) {
+    reportFsError(`Failed to remove lock ${LOCK_PATH}`, err);
+  } finally {
+    ownsLock = false;
+  }
 }
 
 // Store connected pi client
@@ -58,7 +201,7 @@ function ensureToken() {
   }
 }
 
-const AUTH_TOKEN = ensureToken();
+let AUTH_TOKEN = null;
 
 // Native messaging I/O
 let inputBuffer = Buffer.alloc(0);
@@ -132,30 +275,47 @@ process.stdin.on("end", () => {
   cleanup();
 });
 
-function cleanup() {
-  try {
-    fs.unlinkSync(SOCKET_PATH);
-  } catch (err) {
-    reportFsError(`Failed to remove socket ${SOCKET_PATH}`, err);
+let cleanupRan = false;
+function cleanup(code = 0) {
+  if (cleanupRan) return;
+  cleanupRan = true;
+
+  if (ownsPidFile()) {
+    try {
+      fs.unlinkSync(SOCKET_PATH);
+    } catch (err) {
+      reportFsError(`Failed to remove socket ${SOCKET_PATH}`, err);
+    }
+
+    try {
+      fs.unlinkSync(TOKEN_PATH);
+    } catch (err) {
+      reportFsError(`Failed to remove token ${TOKEN_PATH}`, err);
+    }
+
+    try {
+      fs.unlinkSync(PID_PATH);
+    } catch (err) {
+      reportFsError(`Failed to remove pid file ${PID_PATH}`, err);
+    }
+  } else {
+    log("Skipping cleanup because this host no longer owns the pid file");
   }
 
-  try {
-    fs.unlinkSync(TOKEN_PATH);
-  } catch (err) {
-    reportFsError(`Failed to remove token ${TOKEN_PATH}`, err);
-  }
+  releaseHostLock();
 
-  process.exit(0);
+  process.exit(code);
 }
 
-process.on("SIGINT", cleanup);
-process.on("SIGTERM", cleanup);
+process.on("SIGINT", () => cleanup());
+process.on("SIGTERM", () => cleanup());
 process.on("uncaughtException", (err) => {
   log(`Uncaught exception: ${err.message}`);
-  cleanup();
+  cleanup(1);
 });
 
 // Unix socket server for Pi extension
+function startServer() {
 const server = net.createServer((socket) => {
   log("Pi client connected");
   
@@ -229,6 +389,11 @@ const server = net.createServer((socket) => {
   socket.on("error", (e) => log(`Socket error: ${e.message}`));
 });
 
+server.on("error", (err) => {
+  log(`Server error: ${err.message}`);
+  cleanup(1);
+});
+
 server.listen(SOCKET_PATH, () => {
   log(`Listening on ${SOCKET_PATH}`);
   try {
@@ -236,4 +401,18 @@ server.listen(SOCKET_PATH, () => {
   } catch (err) {
     reportFsError(`Failed to chmod socket ${SOCKET_PATH}`, err);
   }
+  releaseHostLock();
 });
+}
+
+(async () => {
+  try {
+    await acquireHostLock();
+    await takeOverHost();
+    AUTH_TOKEN = ensureToken();
+    startServer();
+  } catch (err) {
+    log(`Host startup failed: ${err.message}`);
+    cleanup(1);
+  }
+})();

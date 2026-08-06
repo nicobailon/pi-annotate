@@ -8,6 +8,9 @@ All notable changes to Pi Annotate.
 - Re-resolved selected elements after SPA rerenders before submission. Thanks to Chleba for the contribution.
 - Added top/bottom panel docking and collapse controls so page controls remain selectable. Thanks to Whamp for the contribution.
 - Updated the extension for current Pi packages and cleaned up annotation sockets during session shutdown. Thanks to Hor1zonZzz for the report.
+- Kept annotation controls usable inside focus-trapping modals. Thanks to QuanticPotatoes for the contribution.
+- Prevented a new native host from unlinking a live host socket, and limited cleanup to host-owned resources. Thanks to QuanticPotatoes for the report and implementation direction.
+- Generated the native-host wrapper at install time and resolved a stable Node.js executable instead of shipping machine-local or ephemeral fnm/asdf/mise paths. Thanks to QuanticPotatoes for the contribution.
 
 ## [0.4.3] - 2026-04-22
 
