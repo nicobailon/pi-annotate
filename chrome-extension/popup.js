@@ -1,7 +1,8 @@
 // Pi Annotate - Popup Script
 
 const extId = chrome.runtime.id;
-const installCmd = `./install.sh ${extId}`;
+const isWindows = navigator.platform.toUpperCase().includes('WIN');
+const installCmd = isWindows ? `.\\install-windows.cmd ${extId}` : `./install.sh ${extId}`;
 
 // Elements
 const extIdInput = document.getElementById('ext-id');
