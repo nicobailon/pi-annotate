@@ -728,6 +728,7 @@
     createMarkers();
     createNotesContainer();
     createPanel();
+    startModalGuards();
     
     // Add listeners
     document.addEventListener("mousemove", onMouseMove, true);
@@ -825,6 +826,7 @@
     document.removeEventListener("click", onClick, true);
     document.removeEventListener("wheel", onWheel, { capture: true });
     document.removeEventListener("keydown", onKeyDown, true);
+    stopModalGuards();
     window.removeEventListener("scroll", handleScroll, true);
     window.removeEventListener("resize", handleResize);
     cleanupDragHandlers();
@@ -896,6 +898,34 @@
     document.body.appendChild(markersContainer);
   }
   
+  function isPiAnnotateUI(node) {
+    return node instanceof Node && (
+      notesContainer?.contains(node) || panelEl?.contains(node)
+    );
+  }
+
+  function stopModalFocusTrap(event) {
+    const enteringPiUI = event.type === "focusin" && isPiAnnotateUI(event.target);
+    const leavingModalForPiUI = event.type === "focusout" && isPiAnnotateUI(event.relatedTarget);
+    if (enteringPiUI || leavingModalForPiUI) event.stopImmediatePropagation();
+  }
+
+  function stopModalPointerTrap(event) {
+    if (isPiAnnotateUI(event.target)) event.stopImmediatePropagation();
+  }
+
+  function startModalGuards() {
+    window.addEventListener("focusin", stopModalFocusTrap, true);
+    window.addEventListener("focusout", stopModalFocusTrap, true);
+    window.addEventListener("pointerdown", stopModalPointerTrap, true);
+  }
+
+  function stopModalGuards() {
+    window.removeEventListener("focusin", stopModalFocusTrap, true);
+    window.removeEventListener("focusout", stopModalFocusTrap, true);
+    window.removeEventListener("pointerdown", stopModalPointerTrap, true);
+  }
+
   function createNotesContainer() {
     notesContainer = document.createElement("div");
     notesContainer.className = "pi-notes-container";
