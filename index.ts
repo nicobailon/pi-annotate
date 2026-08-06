@@ -1,10 +1,10 @@
 import { Type } from "typebox";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as net from "node:net";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import type { AnnotationResult, ElementSelection, EditCapture } from "./types.js";
+import type { AnnotationResult, ElementSelection, EditCapture } from "./types.ts";
 
 const SOCKET_PATH = "/tmp/pi-annotate.sock";
 const TOKEN_PATH = "/tmp/pi-annotate.token";
@@ -25,12 +25,39 @@ export default function (pi: ExtensionAPI) {
   let dataBuffer = ""; // Buffer for incomplete JSON messages
   let authToken: string | null = null;
   let currentCtx: AnnotationContext | null = null;
-  
+  let active = true;
+
   function setStatus(message: string) {
-    if (currentCtx?.ui?.setStatus) {
+    if (active && currentCtx?.ui?.setStatus) {
       currentCtx.ui.setStatus("pi-annotate", message);
     }
   }
+
+  async function cancelPendingRequests(reason: string) {
+    const result: AnnotationResult = {
+      success: false,
+      cancelled: true,
+      reason,
+      elements: [],
+      url: "",
+      viewport: { width: 0, height: 0 },
+    };
+    const requests = [...pendingRequests.values()];
+    pendingRequests.clear();
+    await Promise.allSettled(requests.map((resolvePending) => resolvePending(result)));
+  }
+
+  pi.on("session_shutdown", async () => {
+    active = false;
+    currentCtx = null;
+    authToken = null;
+    dataBuffer = "";
+    const socket = browserSocket;
+    browserSocket = null;
+    socket?.removeAllListeners();
+    socket?.destroy();
+    await cancelPendingRequests("session_shutdown");
+  });
   
   // ─────────────────────────────────────────────────────────────────────
   // /annotate Command
@@ -43,10 +70,13 @@ export default function (pi: ExtensionAPI) {
     try {
       await connectToHost();
     } catch (err) {
+      if (!active) return;
       const message = err instanceof Error ? err.message : String(err);
       ctx.ui?.notify(`Browser extension not connected. ${message}. Click the Pi Annotate icon in the browser to wake the service worker, then retry.`, "error");
       return;
     }
+
+    if (!active) return;
     
     const requestId = Date.now();
     sendToHost({
@@ -108,7 +138,7 @@ export default function (pi: ExtensionAPI) {
           if (!line.trim()) continue;
           try {
             const msg = JSON.parse(line);
-            void handleMessage(msg);
+            void handleMessage(msg).catch(() => {});
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             setStatus(`Error: Failed to parse message: ${message}`);
@@ -126,17 +156,7 @@ export default function (pi: ExtensionAPI) {
         browserSocket = null;
         authToken = null;
         dataBuffer = "";
-        for (const [, resolvePending] of pendingRequests) {
-          resolvePending({
-            success: false,
-            cancelled: true,
-            reason: "connection_lost",
-            elements: [],
-            url: "",
-            viewport: { width: 0, height: 0 },
-          });
-        }
-        pendingRequests.clear();
+        void cancelPendingRequests("connection_lost");
       });
     });
   }
@@ -158,7 +178,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function handleMessage(msg: unknown) {
-    if (!isRecord(msg) || typeof msg.type !== "string") return;
+    if (!active || !isRecord(msg) || typeof msg.type !== "string") return;
     
     setStatus(`Received: ${msg.type}`);
 
@@ -170,17 +190,7 @@ export default function (pi: ExtensionAPI) {
       const reason = typeof msg.reason === "string" ? msg.reason : "Session replaced by another terminal";
       
       // Resolve all pending requests with cancelled status
-      for (const [, resolvePending] of pendingRequests) {
-        await resolvePending({
-          success: false,
-          cancelled: true,
-          reason,
-          elements: [],
-          url: "",
-          viewport: { width: 0, height: 0 },
-        });
-      }
-      pendingRequests.clear();
+      await cancelPendingRequests(reason);
       
       // Connection will be destroyed by native host, so clean up
       browserSocket = null;
@@ -200,6 +210,7 @@ export default function (pi: ExtensionAPI) {
         // Command flow - inject as user message
         const result = msg.result;
         const text = await formatResult(result);
+        if (!active) return;
         setStatus("Annotation complete");
         pi.sendUserMessage(text);
       }

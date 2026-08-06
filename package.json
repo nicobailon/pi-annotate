@@ -13,8 +13,9 @@
     "url": "https://github.com/nicobailon/pi-annotate/issues"
   },
   "homepage": "https://github.com/nicobailon/pi-annotate#readme",
-  "dependencies": {
-    "typebox": "^1.1.24"
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
   },
   "keywords": [
     "pi-package",
