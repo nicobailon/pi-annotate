@@ -1,7 +1,10 @@
 param(
   [Parameter(Mandatory = $true, Position = 0)]
   [ValidatePattern('^[a-p]{32}$')]
-  [string]$ExtensionId
+  [string]$ExtensionId,
+  [switch]$EnableWslBridge,
+  [ValidateRange(1, 65535)]
+  [int]$WslBridgePort = 43173
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,7 +24,18 @@ if (-not $NodePath -or -not (Test-Path -LiteralPath $NodePath -PathType Leaf)) {
   throw 'Cannot find a Node.js executable for the native host'
 }
 
-$wrapper = "@echo off`r`n`"$NodePath`" `"%~dp0host.cjs`" %*`r`n"
+$wrapperLines = @('@echo off')
+$WslBridgeToken = ''
+if ($EnableWslBridge) {
+  $bytes = New-Object byte[] 32
+  [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+  $WslBridgeToken = -join ($bytes | ForEach-Object { $_.ToString('x2') })
+  $wrapperLines += "set `"PI_ANNOTATE_WSL_TOKEN=$WslBridgeToken`""
+  $wrapperLines += 'set "PI_ANNOTATE_WSL_HOST=127.0.0.1"'
+  $wrapperLines += "set `"PI_ANNOTATE_WSL_PORT=$WslBridgePort`""
+}
+$wrapperLines += "`"$NodePath`" `"%~dp0host.cjs`" %*"
+$wrapper = ($wrapperLines -join "`r`n") + "`r`n"
 [System.IO.File]::WriteAllText($HostWrapper, $wrapper, [System.Text.UTF8Encoding]::new($false))
 
 $manifest = [ordered]@{
@@ -49,4 +63,10 @@ foreach ($key in $registryKeys) {
 }
 
 Write-Host "Using node at: $NodePath"
+if ($EnableWslBridge) {
+  Write-Host "WSL bridge enabled on Windows loopback port $WslBridgePort."
+  Write-Host "In WSL, run these commands before starting pi:"
+  Write-Host "export PI_ANNOTATE_WSL_BRIDGE=127.0.0.1:$WslBridgePort"
+  Write-Host "export PI_ANNOTATE_WSL_TOKEN=$WslBridgeToken"
+}
 Write-Host "Fully quit and reopen the browser you loaded the extension in."

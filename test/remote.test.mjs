@@ -6,6 +6,7 @@ import * as remoteNamespace from '../remote.ts';
 const {
   makeLocalSocketPath,
   parseAnnotateCommandArgs,
+  parseWslBridgeEnv,
   planRemotePageAccess,
 } = remoteNamespace.default ?? remoteNamespace;
 
@@ -39,4 +40,16 @@ test('makeLocalSocketPath stays short for long SSH aliases', () => {
   assert.equal(socketPath.endsWith('.sock'), true);
   assert.equal(Buffer.byteLength(socketPath), socketPath.length);
   assert.ok(socketPath.length < 104);
+});
+
+
+test('parseWslBridgeEnv requires explicit bridge and token', () => {
+  assert.equal(parseWslBridgeEnv({}), null);
+  assert.deepEqual(parseWslBridgeEnv({
+    PI_ANNOTATE_WSL_BRIDGE: '127.0.0.1:43173',
+    PI_ANNOTATE_WSL_TOKEN: 'secret',
+  }), { host: '127.0.0.1', port: 43173, token: 'secret' });
+  assert.throws(() => parseWslBridgeEnv({ PI_ANNOTATE_WSL_BRIDGE: '127.0.0.1:43173' }), /Set both PI_ANNOTATE_WSL_BRIDGE/);
+  assert.throws(() => parseWslBridgeEnv({ PI_ANNOTATE_WSL_BRIDGE: '127.0.0.1:notaport', PI_ANNOTATE_WSL_TOKEN: 'secret' }), /host:port/);
+  assert.throws(() => parseWslBridgeEnv({ PI_ANNOTATE_WSL_BRIDGE: '0.0.0.0:43173', PI_ANNOTATE_WSL_TOKEN: 'secret' }), /loopback host:port/);
 });
