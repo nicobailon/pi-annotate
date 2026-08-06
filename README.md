@@ -48,9 +48,21 @@ This installs the native messaging manifest for Google Chrome, Google Chrome for
 ## Usage
 
 ```bash
-/annotate                  # Current browser tab
-/annotate https://x.com    # Opens URL first
+/annotate                              # Current same-machine browser tab
+/annotate https://x.com                # Opens URL in the same-machine browser
+/annotate laptop                       # Current tab in the browser on SSH host alias "laptop"
+/annotate laptop http://localhost:3000 # Browser Host loads a page served by this Pi Session Host
 ```
+
+Remote annotation uses your SSH config from the Pi Session Host. The Browser Host must be a macOS or Linux machine that can run Chrome or Chromium, the Pi Annotate browser extension, and the native host. Windows Browser Host support is separate.
+
+Before using `/annotate laptop`, verify SSH works without prompts:
+
+```bash
+ssh -o BatchMode=yes laptop true
+```
+
+Open Chrome or Chromium on the Browser Host, click the Pi Annotate extension icon, and keep it connected. Pi Annotate creates a temporary SSH tunnel to the Browser Host native socket. If the URL is `localhost` or `127.0.0.1`, it also creates a temporary reverse loopback tunnel so the Browser Host can load the page from the Pi Session Host. IPv6 loopback URLs such as `http://[::1]:3000` are not supported for remote annotation. Non-loopback URLs are passed to the Browser Host unchanged.
 
 | Action | How |
 |--------|-----|
@@ -147,6 +159,7 @@ Browser Extension (background.js → content.js)
 | File | Purpose |
 |------|---------|
 | `index.ts` | Pi extension — `/annotate` command + tool |
+| `remote.ts` | SSH Browser Host bridge for remote annotation |
 | `types.ts` | TypeScript interfaces |
 | `chrome-extension/content.js` | Element picker UI (vanilla JS) |
 | `chrome-extension/background.js` | Native messaging, screenshots, tab routing |

@@ -11,6 +11,7 @@ All notable changes to Pi Annotate.
 - Kept annotation controls usable inside focus-trapping modals. Thanks to QuanticPotatoes for the contribution.
 - Prevented a new native host from unlinking a live host socket, and limited cleanup to host-owned resources. Thanks to QuanticPotatoes for the report and implementation direction.
 - Generated the native-host wrapper at install time and resolved a stable Node.js executable instead of shipping machine-local or ephemeral fnm/asdf/mise paths. Thanks to QuanticPotatoes for the contribution.
+- Added SSH remote annotation for macOS/Linux Browser Hosts. Thanks to Whamp for the contribution.
 
 ## [0.4.3] - 2026-04-22
 

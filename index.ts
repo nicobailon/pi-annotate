@@ -5,6 +5,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { AnnotationResult, ElementSelection, EditCapture } from "./types.ts";
+import { createRemoteAnnotationBridge, parseAnnotateCommandArgs, type RemoteAnnotationBridge } from "./remote.ts";
 
 const SOCKET_PATH = "/tmp/pi-annotate.sock";
 const TOKEN_PATH = "/tmp/pi-annotate.token";
@@ -19,13 +20,21 @@ type AnnotationContext = {
   };
 };
 
+type HostConnectionOptions = {
+  socketPath?: string;
+  token?: string;
+  label?: string;
+};
+
 export default function (pi: ExtensionAPI) {
   let browserSocket: net.Socket | null = null;
   const pendingRequests = new Map<number, (result: AnnotationResult) => void | Promise<void>>();
   let dataBuffer = ""; // Buffer for incomplete JSON messages
   let authToken: string | null = null;
+  let connectedSocketPath: string | null = null;
   let currentCtx: AnnotationContext | null = null;
   let active = true;
+  const remoteSessions = new Map<number, RemoteAnnotationBridge>();
 
   function setStatus(message: string) {
     if (active && currentCtx?.ui?.setStatus) {
@@ -51,7 +60,9 @@ export default function (pi: ExtensionAPI) {
     active = false;
     currentCtx = null;
     authToken = null;
+    connectedSocketPath = null;
     dataBuffer = "";
+    cleanupAllRemoteSessions();
     const socket = browserSocket;
     browserSocket = null;
     socket?.removeAllListeners();
@@ -65,27 +76,50 @@ export default function (pi: ExtensionAPI) {
   
   const annotateHandler = async (args: string, ctx: AnnotationContext) => {
     currentCtx = ctx;
-    const url = args.trim() || undefined;
-    
+    const parsed = parseAnnotateCommandArgs(args);
+    let url = parsed.url;
+    let remoteBridge: RemoteAnnotationBridge | null = null;
+
     try {
-      await connectToHost();
+      if (parsed.browserHost) {
+        setStatus(`Preparing remote annotation on ${parsed.browserHost}`);
+        remoteBridge = await createRemoteAnnotationBridge({ browserHost: parsed.browserHost, url });
+        url = remoteBridge.url;
+      }
+      await connectToHost(remoteBridge ? {
+        socketPath: remoteBridge.socketPath,
+        token: remoteBridge.token,
+        label: `Browser Host ${parsed.browserHost}`,
+      } : undefined);
     } catch (err) {
+      remoteBridge?.cleanup();
       if (!active) return;
       const message = err instanceof Error ? err.message : String(err);
-      ctx.ui?.notify(`Browser extension not connected. ${message}. Click the Pi Annotate icon in the browser to wake the service worker, then retry.`, "error");
+      const fallback = parsed.browserHost
+        ? `Remote annotation failed for '${parsed.browserHost}'. ${message}`
+        : `Browser extension not connected. ${message}. Click the Pi Annotate icon in the browser to wake the service worker, then retry.`;
+      ctx.ui?.notify(fallback, "error");
       return;
     }
 
-    if (!active) return;
-    
+    if (!active) {
+      remoteBridge?.cleanup();
+      return;
+    }
+
     const requestId = Date.now();
+    if (remoteBridge) remoteSessions.set(requestId, remoteBridge);
     sendToHost({
       type: "START_ANNOTATION",
       requestId,
       url,
     });
-    
-    ctx.ui?.notify(url ? `Opening annotation mode on ${url}` : "Annotation mode started on current browser tab", "info");
+
+    if (parsed.browserHost) {
+      ctx.ui?.notify(url ? `Opening annotation mode on ${parsed.browserHost}: ${url}` : `Annotation mode started on ${parsed.browserHost}'s current browser tab`, "info");
+    } else {
+      ctx.ui?.notify(url ? `Opening annotation mode on ${url}` : "Annotation mode started on current browser tab", "info");
+    }
   };
 
   pi.registerCommand("annotate", {
@@ -97,35 +131,47 @@ export default function (pi: ExtensionAPI) {
   // Socket Connection
   // ─────────────────────────────────────────────────────────────────────
   
-  function connectToHost(): Promise<void> {
+  function connectToHost(options: HostConnectionOptions = {}): Promise<void> {
     return new Promise((resolve, reject) => {
+      const socketPath = options.socketPath || SOCKET_PATH;
+      const tokenPath = options.token ? "remote Browser Host token" : TOKEN_PATH;
+      const label = options.label || "native host";
+
       if (browserSocket && !browserSocket.destroyed) {
-        resolve();
-        return;
+        if (connectedSocketPath === socketPath) {
+          resolve();
+          return;
+        }
+        browserSocket.destroy();
+        browserSocket = null;
+        connectedSocketPath = null;
+        dataBuffer = "";
       }
 
       try {
-        authToken = fs.readFileSync(TOKEN_PATH, "utf8").trim();
+        authToken = options.token || fs.readFileSync(TOKEN_PATH, "utf8").trim();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        reject(new Error(`Failed to read auth token at ${TOKEN_PATH}: ${message}`, { cause: err }));
+        reject(new Error(`Failed to read auth token at ${tokenPath}: ${message}`, { cause: err }));
         return;
       }
 
-      browserSocket = net.createConnection(SOCKET_PATH);
+      const socket = net.createConnection(socketPath);
+      browserSocket = socket;
       
-      browserSocket.on("connect", () => {
-        setStatus("Connected to native host");
+      socket.on("connect", () => {
+        connectedSocketPath = socketPath;
+        setStatus(`Connected to ${label}`);
         sendToHost({ type: "AUTH", token: authToken });
         resolve();
       });
       
-      browserSocket.on("data", (data) => {
+      socket.on("data", (data) => {
         // Buffer incoming data and split by newlines
         dataBuffer += data.toString();
         if (dataBuffer.length > MAX_SOCKET_BUFFER) {
           setStatus("Error: Socket buffer overflow");
-          browserSocket?.destroy();
+          socket.destroy();
           dataBuffer = "";
           return;
         }
@@ -146,16 +192,19 @@ export default function (pi: ExtensionAPI) {
         }
       });
       
-      browserSocket.on("error", (err) => {
-        setStatus(`Error: ${err.message}`);
+      socket.on("error", (err) => {
+        if (browserSocket === socket) setStatus(`Error: ${err.message}`);
         reject(err);
       });
       
-      browserSocket.on("close", () => {
+      socket.on("close", () => {
+        if (browserSocket !== socket) return;
         setStatus("Disconnected from native host");
         browserSocket = null;
         authToken = null;
+        connectedSocketPath = null;
         dataBuffer = "";
+        cleanupAllRemoteSessions();
         void cancelPendingRequests("connection_lost");
       });
     });
@@ -165,6 +214,21 @@ export default function (pi: ExtensionAPI) {
     if (browserSocket && !browserSocket.destroyed) {
       browserSocket.write(JSON.stringify(msg) + "\n");
     }
+  }
+
+  function cleanupRemoteSession(requestId: number | null) {
+    if (!requestId) return;
+    const session = remoteSessions.get(requestId);
+    if (!session) return;
+    remoteSessions.delete(requestId);
+    session.cleanup();
+  }
+
+  function cleanupAllRemoteSessions() {
+    for (const session of remoteSessions.values()) {
+      session.cleanup();
+    }
+    remoteSessions.clear();
   }
   
   function isRecord(value: unknown): value is Record<string, unknown> {
@@ -191,9 +255,11 @@ export default function (pi: ExtensionAPI) {
       
       // Resolve all pending requests with cancelled status
       await cancelPendingRequests(reason);
+      cleanupAllRemoteSessions();
       
       // Connection will be destroyed by native host, so clean up
       browserSocket = null;
+      connectedSocketPath = null;
       dataBuffer = "";
       return;
     }
@@ -205,8 +271,10 @@ export default function (pi: ExtensionAPI) {
         const resolvePending = pendingRequests.get(requestId);
         if (!resolvePending) return;
         pendingRequests.delete(requestId);
+        cleanupRemoteSession(requestId);
         await resolvePending(msg.result);
       } else {
+        cleanupRemoteSession(requestId);
         // Command flow - inject as user message
         const result = msg.result;
         const text = await formatResult(result);
@@ -215,6 +283,7 @@ export default function (pi: ExtensionAPI) {
         pi.sendUserMessage(text);
       }
     } else if (msg.type === "CANCEL") {
+      cleanupRemoteSession(requestId);
       if (requestId && pendingRequests.has(requestId)) {
         const resolvePending = pendingRequests.get(requestId);
         if (!resolvePending) return;
@@ -503,10 +572,13 @@ export default function (pi: ExtensionAPI) {
       "Returns structured annotations with CSS selectors and element info. " +
       "If no URL is provided, uses the current active browser tab.",
     promptSnippet:
-      "Use only when the user explicitly asks for visual annotation or UI pointing. Call with {url?} and return selected element annotations.",
+      "Use only when the user explicitly asks for visual annotation or UI pointing. Call with {url?, browserHost?} and return selected element annotations.",
     parameters: Type.Object({
       url: Type.Optional(Type.String({
         description: "URL to annotate. If omitted, uses the current browser tab.",
+      })),
+      browserHost: Type.Optional(Type.String({
+        description: "SSH host alias for the macOS/Linux Browser Host. If omitted, uses the same-machine browser.",
       })),
       timeout: Type.Optional(Type.Number({
         description: "Max seconds to wait for annotations. Default: 300 (5 min)",
@@ -515,19 +587,32 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       currentCtx = ctx;
-      const { url, timeout = 300 } = params as { url?: string; timeout?: number };
+      const { browserHost, timeout = 300 } = params as { url?: string; browserHost?: string; timeout?: number };
+      let { url } = params as { url?: string };
       const requestId = Date.now();
+      let remoteBridge: RemoteAnnotationBridge | null = null;
 
       // Try to connect first
       try {
-        await connectToHost();
+        if (browserHost) {
+          remoteBridge = await createRemoteAnnotationBridge({ browserHost, url });
+          url = remoteBridge.url;
+        }
+        await connectToHost(remoteBridge ? {
+          socketPath: remoteBridge.socketPath,
+          token: remoteBridge.token,
+          label: `Browser Host ${browserHost}`,
+        } : undefined);
       } catch (err) {
+        remoteBridge?.cleanup();
         const message = err instanceof Error ? err.message : String(err);
         return {
-          content: [{ type: "text", text: "Browser extension not connected. Click the Pi Annotate icon in the browser to wake the service worker, then retry." }],
+          content: [{ type: "text", text: browserHost ? `Remote annotation failed for '${browserHost}'. ${message}` : "Browser extension not connected. Click the Pi Annotate icon in the browser to wake the service worker, then retry." }],
           details: { error: message },
         };
       }
+
+      if (remoteBridge) remoteSessions.set(requestId, remoteBridge);
 
       return new Promise((resolve) => {
         let timeoutId: NodeJS.Timeout | null = null;
@@ -535,12 +620,13 @@ export default function (pi: ExtensionAPI) {
         const cleanup = () => {
           if (timeoutId) clearTimeout(timeoutId);
           pendingRequests.delete(requestId);
+          cleanupRemoteSession(requestId);
           signal?.removeEventListener("abort", onAbort);
         };
 
         const onAbort = () => {
-          cleanup();
           sendToHost({ type: "CANCEL", requestId, reason: "aborted" });
+          cleanup();
           resolve({
             content: [{ type: "text", text: "Annotation was aborted." }],
             details: { aborted: true },
@@ -549,6 +635,7 @@ export default function (pi: ExtensionAPI) {
         
         // Handle abort signal
         if (signal?.aborted) {
+          cleanup();
           return resolve({
             content: [{ type: "text", text: "Annotation was aborted." }],
             details: { aborted: true },
@@ -567,8 +654,8 @@ export default function (pi: ExtensionAPI) {
         
         // Set timeout
         timeoutId = setTimeout(() => {
-          cleanup();
           sendToHost({ type: "CANCEL", requestId, reason: "timeout" });
+          cleanup();
           resolve({
             content: [{ type: "text", text: `Annotation timed out after ${timeout}s` }],
             details: { timeout: true },
@@ -583,7 +670,7 @@ export default function (pi: ExtensionAPI) {
         });
         
         if (ctx.hasUI) {
-          ctx.ui.notify("Annotation mode started in the browser", "info");
+          ctx.ui.notify(browserHost ? `Annotation mode started in ${browserHost}'s browser` : "Annotation mode started in the browser", "info");
         }
       });
     },
