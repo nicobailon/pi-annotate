@@ -7,8 +7,9 @@ import * as os from "node:os";
 import type { AnnotationResult, ElementSelection, EditCapture } from "./types.ts";
 import { createRemoteAnnotationBridge, parseAnnotateCommandArgs, type RemoteAnnotationBridge } from "./remote.ts";
 
-const SOCKET_PATH = "/tmp/pi-annotate.sock";
-const TOKEN_PATH = "/tmp/pi-annotate.token";
+const IS_WINDOWS = process.platform === "win32";
+const SOCKET_PATH = IS_WINDOWS ? "\\\\.\\pipe\\pi-annotate.sock" : "/tmp/pi-annotate.sock";
+const TOKEN_PATH = IS_WINDOWS ? path.join(os.tmpdir(), "pi-annotate.token") : "/tmp/pi-annotate.token";
 const MAX_SOCKET_BUFFER = 32 * 1024 * 1024; // 32MB (increased from 8MB for edit capture payloads)
 const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024; // 15MB
 
