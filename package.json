@@ -28,6 +28,7 @@
   ],
   "files": [
     "index.ts",
+    "remote.ts",
     "types.ts",
     "banner.png",
     "demo.mp4",
