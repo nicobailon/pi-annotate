@@ -4,6 +4,11 @@ All notable changes to Pi Annotate.
 
 ## [Unreleased]
 
+### Fixed
+- Re-resolved selected elements after SPA rerenders before submission. Thanks to Chleba for the contribution.
+- Added top/bottom panel docking and collapse controls so page controls remain selectable. Thanks to Whamp for the contribution.
+- Updated the extension for current Pi packages and cleaned up annotation sockets during session shutdown. Thanks to Hor1zonZzz for the report.
+
 ## [0.4.3] - 2026-04-22
 
 ### Fixed
