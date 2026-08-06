@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import type { AnnotationResult, ElementSelection, EditCapture } from "./types.ts";
-import { createRemoteAnnotationBridge, parseAnnotateCommandArgs, type RemoteAnnotationBridge } from "./remote.ts";
+import { createRemoteAnnotationBridge, parseAnnotateCommandArgs, parseWslBridgeEnv, type RemoteAnnotationBridge } from "./remote.ts";
 
 const IS_WINDOWS = process.platform === "win32";
 const SOCKET_PATH = IS_WINDOWS ? "\\\\.\\pipe\\pi-annotate.sock" : "/tmp/pi-annotate.sock";
@@ -23,7 +23,9 @@ type AnnotationContext = {
 
 type HostConnectionOptions = {
   socketPath?: string;
+  tcp?: { host: string; port: number };
   token?: string;
+  tokenPath?: string;
   label?: string;
 };
 
@@ -132,14 +134,41 @@ export default function (pi: ExtensionAPI) {
   // Socket Connection
   // ─────────────────────────────────────────────────────────────────────
   
-  function connectToHost(options: HostConnectionOptions = {}): Promise<void> {
+  function defaultHostConnectionOptions(): HostConnectionOptions {
+    const bridge = isWslSession() ? parseWslBridgeEnv() : null;
+    if (!bridge) return {};
+    return {
+      tcp: { host: bridge.host, port: bridge.port },
+      token: bridge.token,
+      tokenPath: "PI_ANNOTATE_WSL_TOKEN",
+      label: `Windows Browser Host bridge at ${bridge.host}:${bridge.port}`,
+    };
+  }
+
+  function connectionKey(options: HostConnectionOptions) {
+    if (options.tcp) return `tcp://${options.tcp.host}:${options.tcp.port}`;
+    return options.socketPath || SOCKET_PATH;
+  }
+
+  function isWslSession() {
+    if (process.platform !== "linux") return false;
+    if (process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP) return true;
+    try {
+      return /microsoft|wsl/i.test(fs.readFileSync("/proc/version", "utf8"));
+    } catch {
+      return false;
+    }
+  }
+
+  function connectToHost(options: HostConnectionOptions = defaultHostConnectionOptions()): Promise<void> {
     return new Promise((resolve, reject) => {
       const socketPath = options.socketPath || SOCKET_PATH;
-      const tokenPath = options.token ? "remote Browser Host token" : TOKEN_PATH;
+      const key = connectionKey(options);
+      const tokenPath = options.tokenPath || (options.token ? "remote Browser Host token" : TOKEN_PATH);
       const label = options.label || "native host";
 
       if (browserSocket && !browserSocket.destroyed) {
-        if (connectedSocketPath === socketPath) {
+        if (connectedSocketPath === key) {
           resolve();
           return;
         }
@@ -157,11 +186,11 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const socket = net.createConnection(socketPath);
+      const socket = options.tcp ? net.createConnection(options.tcp.port, options.tcp.host) : net.createConnection(socketPath);
       browserSocket = socket;
       
       socket.on("connect", () => {
-        connectedSocketPath = socketPath;
+        connectedSocketPath = key;
         setStatus(`Connected to ${label}`);
         sendToHost({ type: "AUTH", token: authToken });
         resolve();

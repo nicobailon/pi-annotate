@@ -51,7 +51,13 @@ Windows:
 .\install-windows.cmd <extension-id>
 ```
 
-The macOS/Linux installer writes native messaging manifests. The Windows installer registers a native messaging manifest under the current user for Google Chrome, Google Chrome for Testing, and Chromium. Fully quit and reopen that browser. The popup will show **Connected** when ready.
+Windows Browser Host for WSL Pi Session Host:
+
+```bat
+.\install-windows.cmd <extension-id> -EnableWslBridge
+```
+
+The macOS/Linux installer writes native messaging manifests. The Windows installer registers a native messaging manifest under the current user for Google Chrome, Google Chrome for Testing, and Chromium. With `-EnableWslBridge`, it also generates a token-authenticated Windows loopback bridge and prints the `PI_ANNOTATE_WSL_BRIDGE` and `PI_ANNOTATE_WSL_TOKEN` exports to run inside WSL before starting pi. Fully quit and reopen that browser. The popup will show **Connected** when ready.
 
 ## Usage
 
@@ -62,7 +68,9 @@ The macOS/Linux installer writes native messaging manifests. The Windows install
 /annotate laptop http://localhost:3000 # Browser Host loads a page served by this Pi Session Host
 ```
 
-Remote annotation uses your SSH config from the Pi Session Host. The Browser Host must be a macOS or Linux machine that can run Chrome or Chromium, the Pi Annotate browser extension, and the native host. Windows Browser Host support is separate.
+Remote annotation uses your SSH config from the Pi Session Host. The Browser Host must be a macOS or Linux machine that can run Chrome or Chromium, the Pi Annotate browser extension, and the native host.
+
+WSL annotation is explicit. Windows owns the Browser Host, Chrome or Chromium, and the native host. Run the Windows installer with `-EnableWslBridge`, copy the printed `PI_ANNOTATE_WSL_BRIDGE` and `PI_ANNOTATE_WSL_TOKEN` exports into WSL, then start pi in that WSL shell. This keeps normal Linux local annotation on `/tmp/pi-annotate.sock` unless those WSL bridge variables are set in a WSL session. The bridge binds to Windows `127.0.0.1` and requires WSL mirrored networking or another Windows-local localhost forwarding setup that makes Windows loopback reachable from WSL.
 
 Before using `/annotate laptop`, verify SSH works without prompts:
 
@@ -195,7 +203,7 @@ tail -f /tmp/pi-annotate-host.log                    # Native host logs on macOS
 | "restricted URL" error | Provide a URL: `/annotate https://example.com` |
 | Native host not connecting | Click extension icon → check status, re-run install, fully restart the supported browser |
 | "Extension ID mismatch" | Copy install command from popup, re-run |
-| Socket errors | macOS/Linux: `ls -la /tmp/pi-annotate.sock`; Windows: check `%TEMP%\pi-annotate-host.log` |
+| Socket errors | macOS/Linux: `ls -la /tmp/pi-annotate.sock`; Windows: check `%TEMP%\pi-annotate-host.log`; WSL: verify `PI_ANNOTATE_WSL_BRIDGE`, `PI_ANNOTATE_WSL_TOKEN`, and Windows localhost reachability |
 
 **Verify native host:**
 - macOS Google Chrome: `cat ~/Library/Application\ Support/Google/Chrome/NativeMessagingHosts/com.pi.annotate.json`

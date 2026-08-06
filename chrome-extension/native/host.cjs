@@ -11,6 +11,9 @@ const TOKEN_PATH = process.env.PI_ANNOTATE_TOKEN || path.join(RUNTIME_DIR, "pi-a
 const PID_PATH = process.env.PI_ANNOTATE_PID || path.join(RUNTIME_DIR, "pi-annotate-host.pid");
 const LOCK_PATH = process.env.PI_ANNOTATE_LOCK || `${PID_PATH}.lock`;
 const LOG_FILE = process.env.PI_ANNOTATE_LOG || path.join(RUNTIME_DIR, "pi-annotate-host.log");
+const WSL_BRIDGE_TOKEN = process.env.PI_ANNOTATE_WSL_TOKEN || "";
+const WSL_BRIDGE_HOST = process.env.PI_ANNOTATE_WSL_HOST || "127.0.0.1";
+const WSL_BRIDGE_PORT = Number.parseInt(process.env.PI_ANNOTATE_WSL_PORT || "", 10);
 const MAX_NATIVE_MESSAGE_BYTES = 32 * 1024 * 1024; // 32MB (increased from 8MB for edit capture payloads)
 const MAX_SOCKET_BUFFER = 32 * 1024 * 1024; // 32MB
 const MAX_LOG_BYTES = 5 * 1024 * 1024; // 5MB
@@ -322,19 +325,15 @@ process.on("uncaughtException", (err) => {
   cleanup(1);
 });
 
-// Unix socket server for Pi extension
-function startServer() {
-const server = net.createServer((socket) => {
-  log("Pi client connected");
-  
-  // If another Pi client is already connected, replace it
-  if (piSocket && !piSocket.destroyed) {
+// Local socket server for Pi extension.
+function replaceActivePiSocket(socket, label) {
+  if (piSocket && !piSocket.destroyed && piSocket !== socket) {
     if (piAuthed) {
       log("Replacing existing authenticated Pi client");
       try {
-        piSocket.write(JSON.stringify({ 
-          type: "SESSION_REPLACED", 
-          reason: "Another terminal started annotation" 
+        piSocket.write(JSON.stringify({
+          type: "SESSION_REPLACED",
+          reason: "Another terminal started annotation"
         }) + "\n");
       } catch (e) {
         log(`Error notifying old client: ${e.message}`);
@@ -344,12 +343,19 @@ const server = net.createServer((socket) => {
     }
     piSocket.destroy();
   }
-  
+
   piSocket = socket;
-  piAuthed = false;
-  
+  piAuthed = true;
+  log(`${label} authenticated`);
+}
+
+function startServer(options = {}) {
+const server = net.createServer((socket) => {
+  const label = options.label || "Pi client";
+  log(`${label} connected`);
+  let socketAuthed = false;
   let buffer = "";
-  
+
   socket.on("data", (data) => {
     buffer += data.toString();
     if (buffer.length > MAX_SOCKET_BUFFER) {
@@ -365,12 +371,13 @@ const server = net.createServer((socket) => {
       if (!line.trim()) continue;
       try {
         const msg = JSON.parse(line);
-        if (!piAuthed) {
-          if (msg?.type === "AUTH" && AUTH_TOKEN && msg.token === AUTH_TOKEN) {
-            piAuthed = true;
-            log("Pi client authenticated");
+        if (!socketAuthed) {
+          const expectedToken = options.token || AUTH_TOKEN;
+          if (msg?.type === "AUTH" && expectedToken && msg.token === expectedToken) {
+            socketAuthed = true;
+            replaceActivePiSocket(socket, label);
           } else {
-            log("Pi client authentication failed");
+            log(`${label} authentication failed`);
             socket.destroy();
             return;
           }
@@ -398,21 +405,53 @@ const server = net.createServer((socket) => {
 });
 
 server.on("error", (err) => {
-  log(`Server error: ${err.message}`);
-  cleanup(1);
+  log(`${options.label || "Server"} error: ${err.message}`);
+  if (!options.optional) cleanup(1);
 });
 
-server.listen(SOCKET_PATH, () => {
-  log(`Listening on ${SOCKET_PATH}`);
-  if (!IS_WINDOWS) {
+const onListening = () => {
+  const target = options.tcp ? `${options.host}:${options.port}` : SOCKET_PATH;
+  log(`Listening on ${target}`);
+  if (!options.tcp && !IS_WINDOWS) {
     try {
       fs.chmodSync(SOCKET_PATH, 0o600);
     } catch (err) {
       reportFsError(`Failed to chmod socket ${SOCKET_PATH}`, err);
     }
   }
-  releaseHostLock();
-});
+  if (!options.optional) releaseHostLock();
+};
+
+if (options.tcp) {
+  server.listen(options.port, options.host, onListening);
+} else {
+  server.listen(SOCKET_PATH, onListening);
+}
+}
+
+function isLoopbackHost(host) {
+  const normalized = String(host || "").toLowerCase();
+  return normalized === "localhost" || normalized === "::1" || /^127(?:\.\d{1,3}){3}$/.test(normalized);
+}
+
+function startWslBridge() {
+  if (!IS_WINDOWS || !WSL_BRIDGE_TOKEN) return;
+  if (!Number.isInteger(WSL_BRIDGE_PORT) || WSL_BRIDGE_PORT < 1 || WSL_BRIDGE_PORT > 65535) {
+    log("WSL bridge disabled: PI_ANNOTATE_WSL_PORT must be 1-65535");
+    return;
+  }
+  if (!isLoopbackHost(WSL_BRIDGE_HOST)) {
+    log("WSL bridge disabled: PI_ANNOTATE_WSL_HOST must be a loopback address");
+    return;
+  }
+  startServer({
+    tcp: true,
+    host: WSL_BRIDGE_HOST,
+    port: WSL_BRIDGE_PORT,
+    token: WSL_BRIDGE_TOKEN,
+    label: "WSL bridge client",
+    optional: true,
+  });
 }
 
 (async () => {
@@ -421,6 +460,7 @@ server.listen(SOCKET_PATH, () => {
     await takeOverHost();
     AUTH_TOKEN = ensureToken();
     startServer();
+    startWslBridge();
   } catch (err) {
     log(`Host startup failed: ${err.message}`);
     cleanup(1);

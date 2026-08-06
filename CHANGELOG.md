@@ -13,6 +13,7 @@ All notable changes to Pi Annotate.
 - Generated the native-host wrapper at install time and resolved a stable Node.js executable instead of shipping machine-local or ephemeral fnm/asdf/mise paths. Thanks to QuanticPotatoes for the contribution.
 - Added SSH remote annotation for macOS/Linux Browser Hosts. Thanks to Whamp for the contribution.
 - Added Windows native-host setup with a named-pipe bridge and current-user Chrome registry manifest. Thanks to Nout431 for the contribution.
+- Added explicit WSL-to-Windows Browser Host bridge setup. Thanks to muhammadessam for the report.
 
 ## [0.4.3] - 2026-04-22
 

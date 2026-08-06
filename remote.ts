@@ -27,6 +27,12 @@ export type ParsedAnnotateArgs = {
   url?: string;
 };
 
+export type WslBridgeConfig = {
+  host: string;
+  port: number;
+  token: string;
+};
+
 export class RemoteAnnotationError extends Error {
   code: string;
 
@@ -79,6 +85,10 @@ function isSupportedLoopbackHostname(hostname: string): boolean {
   return hostname === "localhost" || /^127(?:\.\d{1,3}){3}$/.test(hostname);
 }
 
+function isWslBridgeLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "::1" || /^127(?:\.\d{1,3}){3}$/.test(hostname);
+}
+
 export function planRemotePageAccess(rawUrl: string | undefined, browserPort: number): { url?: string; tunnel?: RemotePageTunnel } {
   if (!rawUrl || !isRemoteLoopbackUrl(rawUrl)) return { url: rawUrl };
 
@@ -99,6 +109,33 @@ export function planRemotePageAccess(rawUrl: string | undefined, browserPort: nu
 
 function defaultPortForProtocol(protocol: string): string {
   return protocol === "https:" ? "443" : "80";
+}
+
+export function parseWslBridgeEnv(env: NodeJS.ProcessEnv = process.env): WslBridgeConfig | null {
+  const target = env.PI_ANNOTATE_WSL_BRIDGE?.trim();
+  const token = env.PI_ANNOTATE_WSL_TOKEN?.trim();
+  if (!target && !token) return null;
+  if (!target || !token) {
+    throw new RemoteAnnotationError(
+      "WSL_BRIDGE_CONFIG_INCOMPLETE",
+      "Set both PI_ANNOTATE_WSL_BRIDGE and PI_ANNOTATE_WSL_TOKEN in WSL before using the Windows Browser Host bridge."
+    );
+  }
+
+  try {
+    const parsed = target.includes("://") ? new URL(target) : new URL(`tcp://${target}`);
+    const host = parsed.hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+    const port = Number.parseInt(parsed.port, 10);
+    if (!host || !Number.isInteger(port) || port < 1 || port > 65535) throw new Error("invalid host or port");
+    if (!isWslBridgeLoopbackHost(host)) throw new Error("bridge host must be loopback");
+    return { host, port, token };
+  } catch (err) {
+    throw new RemoteAnnotationError(
+      "WSL_BRIDGE_CONFIG_INVALID",
+      "PI_ANNOTATE_WSL_BRIDGE must be a loopback host:port value such as 127.0.0.1:43173.",
+      { cause: err }
+    );
+  }
 }
 
 function assertBrowserHost(browserHost: string) {
