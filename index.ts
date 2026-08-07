@@ -21,28 +21,50 @@ type AnnotationContext = {
   };
 };
 
-type HostConnectionOptions = {
-  socketPath?: string;
-  tcp?: { host: string; port: number };
-  token?: string;
-  tokenPath?: string;
-  label?: string;
-};
+type RequestId = number & { readonly __brand: "RequestId" };
+
+type HostConnectionOptions =
+  | {
+      transport: "socket";
+      socketPath?: string;
+      token?: string;
+      tokenPath?: string;
+      label?: string;
+    }
+  | {
+      transport: "tcp";
+      host: string;
+      port: number;
+      token: string;
+      tokenPath: string;
+      label: string;
+    };
 
 export default function (pi: ExtensionAPI) {
   let browserSocket: net.Socket | null = null;
-  const pendingRequests = new Map<number, (result: AnnotationResult) => void | Promise<void>>();
+  const pendingRequests = new Map<RequestId, (result: AnnotationResult) => void | Promise<void>>();
   let dataBuffer = ""; // Buffer for incomplete JSON messages
   let authToken: string | null = null;
   let connectedSocketPath: string | null = null;
   let currentCtx: AnnotationContext | null = null;
   let active = true;
-  const remoteSessions = new Map<number, RemoteAnnotationBridge>();
+  const remoteSessions = new Map<RequestId, RemoteAnnotationBridge>();
+  let nextRequestId = Date.now();
 
   function setStatus(message: string) {
     if (active && currentCtx?.ui?.setStatus) {
       currentCtx.ui.setStatus("pi-annotate", message);
     }
+  }
+
+  function createRequestId(): RequestId {
+    nextRequestId += 1;
+    return nextRequestId as RequestId;
+  }
+
+  function parseRequestId(value: unknown): RequestId | null {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) return null;
+    return value as RequestId;
   }
 
   async function cancelPendingRequests(reason: string) {
@@ -80,28 +102,30 @@ export default function (pi: ExtensionAPI) {
   const annotateHandler = async (args: string, ctx: AnnotationContext) => {
     currentCtx = ctx;
     const parsed = parseAnnotateCommandArgs(args);
+    const browserHost = parsed.mode === "browser-host" ? parsed.browserHost : null;
     let url = parsed.url;
     let remoteBridge: RemoteAnnotationBridge | null = null;
 
     try {
-      if (parsed.browserHost) {
-        setStatus(`Preparing remote annotation on ${parsed.browserHost}`);
-        remoteBridge = await createRemoteAnnotationBridge({ browserHost: parsed.browserHost, url });
+      if (browserHost) {
+        setStatus(`Preparing remote annotation on ${browserHost}`);
+        remoteBridge = await createRemoteAnnotationBridge(url === undefined ? { browserHost } : { browserHost, url });
         url = remoteBridge.url;
       }
       await connectToHost(remoteBridge ? {
+        transport: "socket",
         socketPath: remoteBridge.socketPath,
         token: remoteBridge.token,
-        label: `Browser Host ${parsed.browserHost}`,
+        label: `Browser Host ${browserHost}`,
       } : undefined);
     } catch (err) {
       remoteBridge?.cleanup();
       if (!active) return;
       const message = err instanceof Error ? err.message : String(err);
-      const fallback = parsed.browserHost
-        ? `Remote annotation failed for '${parsed.browserHost}'. ${message}`
+      const fallback = browserHost
+        ? `Remote annotation failed for '${browserHost}'. ${message}`
         : `Browser extension not connected. ${message}. Click the Pi Annotate icon in the browser to wake the service worker, then retry.`;
-      ctx.ui?.notify(fallback, "error");
+      ctx.ui?.notify?.(fallback, "error");
       return;
     }
 
@@ -110,7 +134,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const requestId = Date.now();
+    const requestId = createRequestId();
     if (remoteBridge) remoteSessions.set(requestId, remoteBridge);
     sendToHost({
       type: "START_ANNOTATION",
@@ -118,10 +142,10 @@ export default function (pi: ExtensionAPI) {
       url,
     });
 
-    if (parsed.browserHost) {
-      ctx.ui?.notify(url ? `Opening annotation mode on ${parsed.browserHost}: ${url}` : `Annotation mode started on ${parsed.browserHost}'s current browser tab`, "info");
+    if (browserHost) {
+      ctx.ui?.notify?.(url ? `Opening annotation mode on ${browserHost}: ${url}` : `Annotation mode started on ${browserHost}'s current browser tab`, "info");
     } else {
-      ctx.ui?.notify(url ? `Opening annotation mode on ${url}` : "Annotation mode started on current browser tab", "info");
+      ctx.ui?.notify?.(url ? `Opening annotation mode on ${url}` : "Annotation mode started on current browser tab", "info");
     }
   };
 
@@ -136,9 +160,11 @@ export default function (pi: ExtensionAPI) {
   
   function defaultHostConnectionOptions(): HostConnectionOptions {
     const bridge = isWslSession() ? parseWslBridgeEnv() : null;
-    if (!bridge) return {};
+    if (!bridge) return { transport: "socket" };
     return {
-      tcp: { host: bridge.host, port: bridge.port },
+      transport: "tcp",
+      host: bridge.host,
+      port: bridge.port,
       token: bridge.token,
       tokenPath: "PI_ANNOTATE_WSL_TOKEN",
       label: `Windows Browser Host bridge at ${bridge.host}:${bridge.port}`,
@@ -146,7 +172,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   function connectionKey(options: HostConnectionOptions) {
-    if (options.tcp) return `tcp://${options.tcp.host}:${options.tcp.port}`;
+    if (options.transport === "tcp") return `tcp://${options.host}:${options.port}`;
     return options.socketPath || SOCKET_PATH;
   }
 
@@ -162,9 +188,8 @@ export default function (pi: ExtensionAPI) {
 
   function connectToHost(options: HostConnectionOptions = defaultHostConnectionOptions()): Promise<void> {
     return new Promise((resolve, reject) => {
-      const socketPath = options.socketPath || SOCKET_PATH;
       const key = connectionKey(options);
-      const tokenPath = options.tokenPath || (options.token ? "remote Browser Host token" : TOKEN_PATH);
+      const tokenPath = options.tokenPath || (options.transport === "socket" && options.token ? "remote Browser Host token" : TOKEN_PATH);
       const label = options.label || "native host";
 
       if (browserSocket && !browserSocket.destroyed) {
@@ -186,7 +211,9 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const socket = options.tcp ? net.createConnection(options.tcp.port, options.tcp.host) : net.createConnection(socketPath);
+      const socket = options.transport === "tcp"
+        ? net.createConnection(options.port, options.host)
+        : net.createConnection(options.socketPath || SOCKET_PATH);
       browserSocket = socket;
       
       socket.on("connect", () => {
@@ -246,8 +273,8 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  function cleanupRemoteSession(requestId: number | null) {
-    if (!requestId) return;
+  function cleanupRemoteSession(requestId: RequestId | null) {
+    if (requestId === null) return;
     const session = remoteSessions.get(requestId);
     if (!session) return;
     remoteSessions.delete(requestId);
@@ -276,7 +303,7 @@ export default function (pi: ExtensionAPI) {
     
     setStatus(`Received: ${msg.type}`);
 
-    const requestId = typeof msg.requestId === "number" ? msg.requestId : null;
+    const requestId = parseRequestId(msg.requestId);
 
     if (msg.type === "SESSION_REPLACED") {
       // Another terminal took over the annotation session
@@ -296,7 +323,7 @@ export default function (pi: ExtensionAPI) {
 
     if (msg.type === "ANNOTATIONS_COMPLETE") {
       if (!isAnnotationResult(msg.result)) return;
-      if (requestId && pendingRequests.has(requestId)) {
+      if (requestId !== null && pendingRequests.has(requestId)) {
         // Tool flow - resolve the promise
         const resolvePending = pendingRequests.get(requestId);
         if (!resolvePending) return;
@@ -314,7 +341,7 @@ export default function (pi: ExtensionAPI) {
       }
     } else if (msg.type === "CANCEL") {
       cleanupRemoteSession(requestId);
-      if (requestId && pendingRequests.has(requestId)) {
+      if (requestId !== null && pendingRequests.has(requestId)) {
         const resolvePending = pendingRequests.get(requestId);
         if (!resolvePending) return;
         pendingRequests.delete(requestId);
@@ -619,16 +646,17 @@ export default function (pi: ExtensionAPI) {
       currentCtx = ctx;
       const { browserHost, timeout = 300 } = params as { url?: string; browserHost?: string; timeout?: number };
       let { url } = params as { url?: string };
-      const requestId = Date.now();
+      const requestId = createRequestId();
       let remoteBridge: RemoteAnnotationBridge | null = null;
 
       // Try to connect first
       try {
         if (browserHost) {
-          remoteBridge = await createRemoteAnnotationBridge({ browserHost, url });
+          remoteBridge = await createRemoteAnnotationBridge(url === undefined ? { browserHost } : { browserHost, url });
           url = remoteBridge.url;
         }
         await connectToHost(remoteBridge ? {
+          transport: "socket",
           socketPath: remoteBridge.socketPath,
           token: remoteBridge.token,
           label: `Browser Host ${browserHost}`,
@@ -700,7 +728,7 @@ export default function (pi: ExtensionAPI) {
         });
         
         if (ctx.hasUI) {
-          ctx.ui.notify(browserHost ? `Annotation mode started in ${browserHost}'s browser` : "Annotation mode started in the browser", "info");
+          ctx.ui?.notify?.(browserHost ? `Annotation mode started in ${browserHost}'s browser` : "Annotation mode started in the browser", "info");
         }
       });
     },

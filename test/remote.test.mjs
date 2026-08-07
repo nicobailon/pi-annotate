@@ -11,14 +11,14 @@ const {
 } = remoteNamespace.default ?? remoteNamespace;
 
 test('parseAnnotateCommandArgs preserves same-machine URL forms', () => {
-  assert.deepEqual(parseAnnotateCommandArgs(''), {});
-  assert.deepEqual(parseAnnotateCommandArgs('https://example.com/a b'), { url: 'https://example.com/a b' });
-  assert.deepEqual(parseAnnotateCommandArgs('http://localhost:3000'), { url: 'http://localhost:3000' });
+  assert.deepEqual(parseAnnotateCommandArgs(''), { mode: 'same-machine' });
+  assert.deepEqual(parseAnnotateCommandArgs('https://example.com/a b'), { mode: 'same-machine', url: 'https://example.com/a b' });
+  assert.deepEqual(parseAnnotateCommandArgs('http://localhost:3000'), { mode: 'same-machine', url: 'http://localhost:3000' });
 });
 
 test('parseAnnotateCommandArgs treats first non-URL token as Browser Host', () => {
-  assert.deepEqual(parseAnnotateCommandArgs('laptop'), { browserHost: 'laptop', url: undefined });
-  assert.deepEqual(parseAnnotateCommandArgs('laptop http://localhost:3000'), { browserHost: 'laptop', url: 'http://localhost:3000' });
+  assert.deepEqual(parseAnnotateCommandArgs('laptop'), { mode: 'browser-host', browserHost: 'laptop' });
+  assert.deepEqual(parseAnnotateCommandArgs('laptop http://localhost:3000'), { mode: 'browser-host', browserHost: 'laptop', url: 'http://localhost:3000' });
 });
 
 test('planRemotePageAccess rewrites supported loopback URLs to Browser Host loopback port', () => {

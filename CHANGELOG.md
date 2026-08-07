@@ -4,6 +4,9 @@ All notable changes to Pi Annotate.
 
 ## [Unreleased]
 
+### Changed
+- Tightened TypeScript state models for annotation argument parsing, host connections, and request IDs.
+
 ### Fixed
 - Re-resolved selected elements after SPA rerenders before submission. Thanks to Chleba for the contribution.
 - Added top/bottom panel docking and collapse controls so page controls remain selectable. Thanks to Whamp for the contribution.

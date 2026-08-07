@@ -1,7 +1,8 @@
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn, type ChildProcessByStdio } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { Readable } from "node:stream";
 
 const REMOTE_SOCKET_PATH = "/tmp/pi-annotate.sock";
 const REMOTE_TOKEN_PATH = "/tmp/pi-annotate.token";
@@ -22,10 +23,9 @@ export type RemoteAnnotationBridge = {
   cleanup: () => void;
 };
 
-export type ParsedAnnotateArgs = {
-  browserHost?: string;
-  url?: string;
-};
+export type ParsedAnnotateArgs =
+  | { mode: "same-machine"; url?: string }
+  | { mode: "browser-host"; browserHost: string; url?: string };
 
 export type WslBridgeConfig = {
   host: string;
@@ -45,15 +45,15 @@ export class RemoteAnnotationError extends Error {
 
 export function parseAnnotateCommandArgs(args: string): ParsedAnnotateArgs {
   const trimmed = args.trim();
-  if (!trimmed) return {};
+  if (!trimmed) return { mode: "same-machine" };
 
   const [first, ...rest] = trimmed.split(/\s+/);
-  if (isUrlLike(first)) return { url: trimmed };
+  if (isUrlLike(first)) return { mode: "same-machine", url: trimmed };
 
-  return {
-    browserHost: first,
-    url: rest.length > 0 ? rest.join(" ") : undefined,
-  };
+  const url = rest.length > 0 ? rest.join(" ") : null;
+  return url
+    ? { mode: "browser-host", browserHost: first, url }
+    : { mode: "browser-host", browserHost: first };
 }
 
 export function isUrlLike(value: string): boolean {
@@ -90,7 +90,8 @@ function isWslBridgeLoopbackHost(hostname: string): boolean {
 }
 
 export function planRemotePageAccess(rawUrl: string | undefined, browserPort: number): { url?: string; tunnel?: RemotePageTunnel } {
-  if (!rawUrl || !isRemoteLoopbackUrl(rawUrl)) return { url: rawUrl };
+  if (!rawUrl) return {};
+  if (!isRemoteLoopbackUrl(rawUrl)) return { url: rawUrl };
 
   const parsed = new URL(rawUrl);
   const targetPort = Number.parseInt(parsed.port || defaultPortForProtocol(parsed.protocol), 10);
@@ -240,7 +241,7 @@ function unlinkIfExists(filePath: string) {
   }
 }
 
-function waitForLocalSocket(proc: ChildProcessWithoutNullStreams, socketPath: string): Promise<void> {
+function waitForLocalSocket(proc: ChildProcessByStdio<null, null, Readable>, socketPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
     let stderr = "";
@@ -330,11 +331,10 @@ export async function createRemoteAnnotationBridge(options: { browserHost: strin
   }
 
   let cleaned = false;
-  return {
+  const bridge = {
     browserHost,
     socketPath,
     token,
-    url: pageAccess.url,
     cleanup() {
       if (cleaned) return;
       cleaned = true;
@@ -342,4 +342,5 @@ export async function createRemoteAnnotationBridge(options: { browserHost: strin
       unlinkIfExists(socketPath);
     },
   };
+  return pageAccess.url === undefined ? bridge : { ...bridge, url: pageAccess.url };
 }
