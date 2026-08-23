@@ -4,6 +4,9 @@ All notable changes to Pi Annotate.
 
 ## [Unreleased]
 
+### Fixed
+- Fixed the popup ready and trouble sections so they render after connection checks. Thanks to [@kkunkunya](https://github.com/kkunkunya) for #25.
+
 ## [0.5.0] - 2026-08-07
 
 ### Added
