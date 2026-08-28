@@ -184,6 +184,12 @@ Browser Extension (background.js → content.js)
 
 Auth token generated per-run at `/tmp/pi-annotate.token` on macOS/Linux or `%TEMP%\pi-annotate.token` on Windows. Unix socket and token files use 0600 permissions where supported.
 
+### Pending captures
+
+If you submit an annotation after the browser/native host has started but before a Pi session is attached, Pi Annotate stores the completed capture in a private cache file instead of dropping it. The queued record retains its screenshot data where captured. On the next `/annotate` invocation from a connected Pi session, queued captures are injected as **Recovered Pending Annotation** messages before the new annotation starts and are removed only after that session acknowledges them.
+
+The popup distinguishes the browser host from Pi-session connection: it shows **Connected to Pi** when a session is attached and **Waiting for Pi · N pending capture(s)** when completed captures await recovery. Cache location defaults to `~/Library/Caches/pi-annotate` on macOS, `$XDG_CACHE_HOME/pi-annotate` (or `~/.cache/pi-annotate`) on Linux, and `%LOCALAPPDATA%/pi-annotate` on Windows. Set `PI_ANNOTATE_PENDING_CAPTURES` to override the queue file path.
+
 ## Development
 
 No build step. Edit `content.js` or `background.js` directly, reload at `chrome://extensions`. Pi extension (TypeScript) loads via jiti — restart pi after changes.

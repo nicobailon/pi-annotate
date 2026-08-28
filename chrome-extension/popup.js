@@ -72,9 +72,16 @@ document.getElementById('retry-btn')?.addEventListener('click', () => {
 });
 
 // Update UI based on connection state
-function setConnected() {
-  statusDot.className = 'status-dot connected';
-  statusText.textContent = 'Connected';
+function setConnected({ piConnected = false, pendingCaptureCount = 0 } = {}) {
+  statusDot.className = `status-dot ${piConnected ? 'connected' : 'checking'}`;
+  const pending = pendingCaptureCount > 0
+    ? ` · ${pendingCaptureCount} pending capture${pendingCaptureCount === 1 ? '' : 's'}`
+    : '';
+  statusText.textContent = piConnected
+    ? `Connected to Pi${pending}`
+    : pending
+      ? `Waiting for Pi${pending}`
+      : 'Browser connected — waiting for Pi';
   setupSection.style.display = 'none';
   readySection.style.display = 'block';
   troubleSection.style.display = 'none';
@@ -116,7 +123,7 @@ async function checkConnection() {
     const error = result?.error || '';
 
     if (result?.connected) {
-      setConnected();
+      setConnected(result);
       return;
     }
 

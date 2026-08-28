@@ -3,6 +3,7 @@ const net = require("net");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { createPendingCaptureQueue } = require("./pending-captures.cjs");
 
 const IS_WINDOWS = process.platform === "win32";
 const RUNTIME_DIR = IS_WINDOWS ? os.tmpdir() : "/tmp";
@@ -11,6 +12,12 @@ const TOKEN_PATH = process.env.PI_ANNOTATE_TOKEN || path.join(RUNTIME_DIR, "pi-a
 const PID_PATH = process.env.PI_ANNOTATE_PID || path.join(RUNTIME_DIR, "pi-annotate-host.pid");
 const LOCK_PATH = process.env.PI_ANNOTATE_LOCK || `${PID_PATH}.lock`;
 const LOG_FILE = process.env.PI_ANNOTATE_LOG || path.join(RUNTIME_DIR, "pi-annotate-host.log");
+const CACHE_DIR = IS_WINDOWS
+  ? path.join(process.env.LOCALAPPDATA || os.homedir(), "pi-annotate")
+  : process.platform === "darwin"
+    ? path.join(os.homedir(), "Library", "Caches", "pi-annotate")
+    : path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "pi-annotate");
+const PENDING_CAPTURE_PATH = process.env.PI_ANNOTATE_PENDING_CAPTURES || path.join(CACHE_DIR, "pending-captures.json");
 const WSL_BRIDGE_TOKEN = process.env.PI_ANNOTATE_WSL_TOKEN || "";
 const WSL_BRIDGE_HOST = process.env.PI_ANNOTATE_WSL_HOST || "127.0.0.1";
 const WSL_BRIDGE_PORT = Number.parseInt(process.env.PI_ANNOTATE_WSL_PORT || "", 10);
@@ -198,6 +205,15 @@ function releaseHostLock() {
 // Store connected pi client
 let piSocket = null;
 let piAuthed = false;
+const pendingCaptures = createPendingCaptureQueue({ filePath: PENDING_CAPTURE_PATH });
+
+function sendPendingCaptures() {
+  if (!piSocket || piSocket.destroyed) return;
+  piSocket.write(JSON.stringify({
+    type: "PENDING_ANNOTATIONS",
+    captures: pendingCaptures.read(),
+  }) + "\n");
+}
 
 function ensureToken() {
   try {
@@ -260,12 +276,20 @@ function handleExtensionMessage(msg) {
   
   // Health check - respond immediately without forwarding
   if (msg?.type === "PING") {
-    writeMessage({ type: "PONG", timestamp: Date.now() });
+    writeMessage({
+      type: "PONG",
+      timestamp: Date.now(),
+      piConnected: Boolean(piSocket && !piSocket.destroyed && piAuthed),
+      pendingCaptureCount: pendingCaptures.read().length,
+    });
     return;
   }
   
-  if (piSocket && !piSocket.destroyed) {
+  if (piSocket && !piSocket.destroyed && piAuthed) {
     piSocket.write(JSON.stringify(msg) + "\n");
+  } else if (msg?.type === "ANNOTATIONS_COMPLETE") {
+    const capture = pendingCaptures.enqueue(msg);
+    log(`Queued annotation capture ${capture.id}; no Pi client connected`);
   } else {
     log("No pi client connected, message dropped");
   }
@@ -381,6 +405,12 @@ const server = net.createServer((socket) => {
             socket.destroy();
             return;
           }
+        } else if (msg?.type === "RECOVER_PENDING_ANNOTATIONS") {
+          log("Pi requested pending annotation recovery");
+          sendPendingCaptures();
+        } else if (msg?.type === "ACK_PENDING_ANNOTATIONS") {
+          const remaining = pendingCaptures.acknowledge(msg.captureIds);
+          log(`Pi acknowledged pending annotation captures; ${remaining.length} remain`);
         } else {
           // Forward to Chrome extension
           log(`From Pi: ${redactForLog(msg)}`);

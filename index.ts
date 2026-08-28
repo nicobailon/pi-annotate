@@ -118,6 +118,7 @@ export default function (pi: ExtensionAPI) {
         token: remoteBridge.token,
         label: `Browser Host ${browserHost}`,
       } : undefined);
+      requestPendingCaptures();
     } catch (err) {
       remoteBridge?.cleanup();
       if (!active) return;
@@ -273,6 +274,10 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
+  function requestPendingCaptures() {
+    sendToHost({ type: "RECOVER_PENDING_ANNOTATIONS" });
+  }
+
   function cleanupRemoteSession(requestId: RequestId | null) {
     if (requestId === null) return;
     const session = remoteSessions.get(requestId);
@@ -318,6 +323,28 @@ export default function (pi: ExtensionAPI) {
       browserSocket = null;
       connectedSocketPath = null;
       dataBuffer = "";
+      return;
+    }
+
+    if (msg.type === "PENDING_ANNOTATIONS") {
+      const captures = Array.isArray(msg.captures) ? msg.captures : [];
+      const captureIds: string[] = [];
+      let recovered = 0;
+      for (const capture of captures) {
+        if (!isRecord(capture) || typeof capture.id !== "string" || !isRecord(capture.message)) continue;
+        const result = capture.message.result;
+        if (!isAnnotationResult(result)) {
+          captureIds.push(capture.id);
+          continue;
+        }
+        const text = await formatResult(result);
+        if (!active) return;
+        pi.sendUserMessage(`## Recovered Pending Annotation\n\n${text}`);
+        captureIds.push(capture.id);
+        recovered += 1;
+      }
+      if (captureIds.length > 0) sendToHost({ type: "ACK_PENDING_ANNOTATIONS", captureIds });
+      if (recovered > 0) setStatus(`Recovered ${recovered} pending annotation${recovered === 1 ? "" : "s"}`);
       return;
     }
 
@@ -661,6 +688,7 @@ export default function (pi: ExtensionAPI) {
           token: remoteBridge.token,
           label: `Browser Host ${browserHost}`,
         } : undefined);
+        requestPendingCaptures();
       } catch (err) {
         remoteBridge?.cleanup();
         const message = err instanceof Error ? err.message : String(err);
