@@ -209,10 +209,18 @@ const pendingCaptures = createPendingCaptureQueue({ filePath: PENDING_CAPTURE_PA
 
 function sendPendingCaptures() {
   if (!piSocket || piSocket.destroyed) return;
-  piSocket.write(JSON.stringify({
-    type: "PENDING_ANNOTATIONS",
-    captures: pendingCaptures.read(),
-  }) + "\n");
+  const captures = pendingCaptures.read();
+  if (captures.length === 0) {
+    piSocket.write(JSON.stringify({ type: "PENDING_ANNOTATIONS", captures: [] }) + "\n");
+    return;
+  }
+  for (const capture of captures) {
+    if (!piSocket || piSocket.destroyed) return;
+    piSocket.write(JSON.stringify({
+      type: "PENDING_ANNOTATIONS",
+      captures: [capture],
+    }) + "\n");
+  }
 }
 
 function ensureToken() {
