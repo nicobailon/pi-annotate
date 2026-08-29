@@ -150,7 +150,11 @@ function connectNative() {
   port.onMessage.addListener((msg) => {
     if (msg?.type === "PONG") {
       lastNativeDisconnectError = "";
-      resolvePendingPing({ connected: true });
+      resolvePendingPing({
+        connected: true,
+        piConnected: msg.piConnected === true,
+        pendingCaptureCount: Number.isInteger(msg.pendingCaptureCount) ? msg.pendingCaptureCount : 0,
+      });
       return;
     }
 
