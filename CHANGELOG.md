@@ -4,8 +4,10 @@ All notable changes to Pi Annotate.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-09-04
+
 ### Fixed
-- Retained annotations submitted before Pi connects, including screenshots, and recovered them on the next connection. Thanks to [@drouhard](https://github.com/drouhard) for #26.
+- Annotations submitted while Pi is disconnected are now saved with their screenshots and recovered the next time you run `/annotate`. Thanks to [@drouhard](https://github.com/drouhard) for #26.
 
 ## [0.5.1] - 2026-08-23
 
