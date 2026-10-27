@@ -339,7 +339,7 @@ export default function (pi: ExtensionAPI) {
         }
         const text = await formatResult(result);
         if (!active) return;
-        pi.sendUserMessage(`## Recovered Pending Annotation\n\n${text}`);
+        pi.sendUserMessage(`## Recovered Pending Annotation\n\n${text}`, { deliverAs: "steer" });
         captureIds.push(capture.id);
         recovered += 1;
       }
@@ -364,7 +364,8 @@ export default function (pi: ExtensionAPI) {
         const text = await formatResult(result);
         if (!active) return;
         setStatus("Annotation complete");
-        pi.sendUserMessage(text);
+        // The user can annotate while Pi works, so queue the note into the current turn.
+        pi.sendUserMessage(text, { deliverAs: "steer" });
       }
     } else if (msg.type === "CANCEL") {
       cleanupRemoteSession(requestId);
