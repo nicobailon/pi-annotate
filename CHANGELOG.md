@@ -4,6 +4,9 @@ All notable changes to Pi Annotate.
 
 ## [Unreleased]
 
+### Fixed
+- Fixed the `Agent is already processing` error. An annotation you submit while Pi works now queues into the current turn.
+
 ## [0.5.2] - 2026-09-04
 
 ### Fixed
